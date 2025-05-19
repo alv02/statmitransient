@@ -1,13 +1,9 @@
 from typing import Sequence
 
-import mitsuba as mi
-from mitsuba import (
-    Float,
-    Int32,
-    ScalarInt32,
-    TensorXf,
-)
 import drjit as dr
+import mitsuba as mi
+import numpy as np
+from mitsuba import Float, Int32, ScalarInt32, TensorXf
 
 from mitransient.render.transient_image_block import TransientImageBlock
 
@@ -70,16 +66,16 @@ class TransientHDRFilm(mi.Film):
     def prepare(self, aovs: Sequence[str]):
         # Prepare steady film
         steady_hdrfilm_dict = {
-            'type': 'hdrfilm',
-            'width': self.size().x,
-            'height': self.size().y,
-            'pixel_format': "luminance" if mi.is_monochromatic else "rgb",
-            'crop_offset_x': self.crop_offset().x,
-            'crop_offset_y': self.crop_offset().y,
-            'crop_width': self.crop_size().x,
-            'crop_height': self.crop_size().y,
-            'sample_border': self.sample_border(),
-            'rfilter': self.rfilter()
+            "type": "hdrfilm",
+            "width": self.size().x,
+            "height": self.size().y,
+            "pixel_format": "luminance" if mi.is_monochromatic else "rgb",
+            "crop_offset_x": self.crop_offset().x,
+            "crop_offset_y": self.crop_offset().y,
+            "crop_width": self.crop_size().x,
+            "crop_height": self.crop_size().y,
+            "sample_border": self.sample_border(),
+            "rfilter": self.rfilter(),
         }
         self.steady: mi.Film = mi.load_dict(steady_hdrfilm_dict)
         self.steady.prepare(aovs)
@@ -105,21 +101,24 @@ class TransientHDRFilm(mi.Film):
             channels.append(aovs[i])
 
         crop_offset_xyt = mi.ScalarPoint3i(
-            self.crop_offset().x, self.crop_offset().y, 0)
+            self.crop_offset().x, self.crop_offset().y, 0
+        )
         crop_size_xyt = mi.ScalarVector3u(
-            self.size().x, self.size().y, self.temporal_bins)
+            self.size().x, self.size().y, self.temporal_bins
+        )
 
         self.transient_storage = TransientImageBlock(
             size_xyt=crop_size_xyt,
             offset_xyt=crop_offset_xyt,
             channel_count=len(channels),
-            rfilter=self.rfilter()
+            rfilter=self.rfilter(),
         )
         self.channels = channels
 
         if len(set(channels)) != len(channels):
-            mi.Log(mi.LogLevel.Error,
-                   "Film::prepare_transient_(): duplicate channel name.")
+            mi.Log(
+                mi.LogLevel.Error, "Film::prepare_transient_(): duplicate channel name."
+            )
 
         return len(self.channels)
 
@@ -132,13 +131,16 @@ class TransientHDRFilm(mi.Film):
     def develop(self, raw: bool = False):
         steady_image = self.steady.develop(raw=raw)
         transient_image = self.develop_transient_(raw=raw)
+        np.save("sum tensor.npy", self.transient_storage.sum_tensor)
 
         return steady_image, transient_image
 
     def develop_transient_(self, raw: bool = False):
         if not self.transient_storage:
-            mi.Log(mi.LogLevel.Error,
-                   "No transient storage allocated, was prepare_transient_() called first?")
+            mi.Log(
+                mi.LogLevel.Error,
+                "No transient storage allocated, was prepare_transient_() called first?",
+            )
 
         if raw:
             return self.transient_storage.tensor
@@ -165,9 +167,15 @@ class TransientHDRFilm(mi.Film):
 
         return TensorXf(values, tuple(list(data.shape[0:-1]) + [target_ch]))
 
-    def add_transient_data(self, pos: mi.Vector2f, distance: mi.Float,
-                           wavelengths: mi.UnpolarizedSpectrum, spec: mi.Spectrum,
-                           ray_weight: mi.Float, active: mi.Bool):
+    def add_transient_data(
+        self,
+        pos: mi.Vector2f,
+        distance: mi.Float,
+        wavelengths: mi.UnpolarizedSpectrum,
+        spec: mi.Spectrum,
+        ray_weight: mi.Float,
+        active: mi.Bool,
+    ):
         """
         Add a path's contribution to the film:
         * pos: pixel position
@@ -178,8 +186,10 @@ class TransientHDRFilm(mi.Film):
         * active: mask
         """
         pos_distance = (distance - self.start_opl) / self.bin_width_opl
+
         coords = mi.Vector3f(pos.x, pos.y, pos_distance)
         mask = (pos_distance >= 0) & (pos_distance < self.temporal_bins)
+
         self.transient_storage.put(
             pos=coords,
             wavelengths=wavelengths,
@@ -206,11 +216,14 @@ class TransientHDRFilm(mi.Film):
     def traverse(self, callback):
         super().traverse(callback)
         callback.put_parameter(
-            "temporal_bins", self.temporal_bins, mi.ParamFlags.NonDifferentiable)
+            "temporal_bins", self.temporal_bins, mi.ParamFlags.NonDifferentiable
+        )
         callback.put_parameter(
-            "bin_width_opl", self.bin_width_opl, mi.ParamFlags.NonDifferentiable)
+            "bin_width_opl", self.bin_width_opl, mi.ParamFlags.NonDifferentiable
+        )
         callback.put_parameter(
-            "start_opl", self.start_opl, mi.ParamFlags.NonDifferentiable)
+            "start_opl", self.start_opl, mi.ParamFlags.NonDifferentiable
+        )
 
     def parameters_changed(self, keys):
         super().parameters_changed(keys)

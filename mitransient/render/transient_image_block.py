@@ -26,7 +26,7 @@ class TransientImageBlock(mi.Object):
         # coalesce: bool = False,
         # compensate: bool = False,
         warn_negative: bool = False,
-        warn_invalid: bool = False
+        warn_invalid: bool = False,
     ):
         super().__init__()
         self.offset_xyt = offset_xyt
@@ -44,14 +44,17 @@ class TransientImageBlock(mi.Object):
         if rfilter and rfilter.is_box_filter():
             self.rfilter = None
 
-        self.border_size = self.rfilter.border_size() if (self.rfilter and border) else 0
+        self.border_size = (
+            self.rfilter.border_size() if (self.rfilter and border) else 0
+        )
 
         self.set_size(size_xyt)
         self.clear()
 
     def clear(self):
         border_size_ScalarPoint3 = mi.ScalarVector3u(
-            self.border_size, self.border_size, 0)
+            self.border_size, self.border_size, 0
+        )
         size_ext = self.size_xyt + 2 * border_size_ScalarPoint3
 
         size_flat = self.channel_count * dr.prod(size_ext)
@@ -60,6 +63,11 @@ class TransientImageBlock(mi.Object):
         self.tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         # Compensation is not implented: https://github.com/mitsuba-renderer/mitsuba3/blob/b2ec619c7ba612edb1cf820463b32e5a334d8471/src/render/imageblock.cpp#L80
 
+        self.count = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        self.sum_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        self.sum2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        self.sum3_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+
     def set_size(self, size_xyt: mi.ScalarVector3u):
         if dr.all(size_xyt == self.size_xyt):
             return
@@ -67,12 +75,35 @@ class TransientImageBlock(mi.Object):
         self.size_xyt = size_xyt
 
     def accum(self, value: mi.Float, index: mi.UInt32, active: mi.Bool):
-        dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array,
-                          value, index, active)
+        dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
 
-    def put(self, pos: mi.Point3f, wavelengths: mi.UnpolarizedSpectrum,
-            value: mi.Spectrum, alpha: mi.Float,
-            weight: mi.Float, active: bool = True):
+    def box_cox(self, value: mi.Float, lam=0.5):
+        return dr.log(value) if lam == 0 else ((dr.power(value, lam) - 1) / lam)
+
+    def update_statistics_single_channel(self, value, index, active):
+        dr.scatter_reduce(dr.ReduceOp.Add, self.count.array, 1.0, index, active)
+        dr.scatter_reduce(dr.ReduceOp.Add, self.sum_tensor.array, value, index, active)
+        dr.scatter_reduce(
+            dr.ReduceOp.Add, self.sum2_tensor.array, value * value, index, active
+        )
+        dr.scatter_reduce(
+            dr.ReduceOp.Add,
+            self.sum3_tensor.array,
+            value * value * value,
+            index,
+            active,
+        )
+
+    def put(
+        self,
+        pos: mi.Point3f,
+        wavelengths: mi.UnpolarizedSpectrum,
+        value: mi.Spectrum,
+        alpha: mi.Float,
+        weight: mi.Float,
+        active: bool = True,
+    ):
+        dr.print(value.shape)
         spec_u = mi.unpolarized_spectrum(value)
 
         if mi.is_spectral:
@@ -119,9 +150,14 @@ class TransientImageBlock(mi.Object):
             active &= dr.all((0 <= p) & (p < self.size_xyt))
 
             for k in range(self.channel_count):
+                values_bc = self.box_cox(values[k])
                 self.accum(values[k], index + k, active)
+                self.update_statistics_single_channel(values_bc, index + k, active)
         else:
-            mi.Log(mi.LogLevel.Error, "TransientImageBlock::put_(): using a rfilter but it is not supported. If you need this, please open an issue on GitHub.")
+            mi.Log(
+                mi.LogLevel.Error,
+                "TransientImageBlock::put_(): using a rfilter but it is not supported. If you need this, please open an issue on GitHub.",
+            )
 
     def to_string(self):
         string = f"{type(self).__name__}[\n"

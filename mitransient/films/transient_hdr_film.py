@@ -131,9 +131,57 @@ class TransientHDRFilm(mi.Film):
     def develop(self, raw: bool = False):
         steady_image = self.steady.develop(raw=raw)
         transient_image = self.develop_transient_(raw=raw)
-        np.save("sum tensor.npy", self.transient_storage.sum_tensor)
+        self.develop_stats()
+        np.save("./transient_data.npy", transient_image)
 
         return steady_image, transient_image
+
+    def develop_stats(self):
+        count = self.transient_storage.count
+        sum1 = self.transient_storage.sum_tensor
+        sum2 = self.transient_storage.sum2_tensor
+        sum3 = self.transient_storage.sum3_tensor
+
+        expected_samples = 1024
+        missing = expected_samples - count
+        # Make sure there are no negatives if by error there are more than 1024 samples
+        missing = np.maximum(0, missing)
+
+        # Box-Cox of zero (0 transformed)
+        box_cox_zero = self.transient_storage.box_cox(0.0)
+
+        # Fill accumulators with zeros
+        sum1 += missing * box_cox_zero
+        sum2 += missing * box_cox_zero**2
+        sum3 += missing * box_cox_zero**3
+        count += missing
+
+        # Mean
+        mu = sum1 / count  # Variance with Bessel correction
+        var = (sum2 - sum1**2 / count) / (count - 1)
+
+        # Skewness (M3)
+        m3 = (sum3 - 3 * sum1 * sum2 / count + 2 * (sum1**3) / (count**2)) / count
+
+        # When the variance is 0 there is no need for skewness correction
+        estimands = np.where(var == 0, mu, mu + m3 / (6 * var * expected_samples))
+        estimands_variance = var / expected_samples
+        estimands = estimands[..., :3]
+        estimands_variance = estimands_variance[..., :3]
+        estimands_expanded = estimands[..., dr.newaxis]
+        print(estimands_expanded.shape)
+        estimands_variance_expanded = estimands_variance[..., dr.newaxis]
+        print(estimands_variance_expanded.shape)
+        estimands_np = dr.detach(estimands_expanded)
+        estimands_variance_np = dr.detach(estimands_variance_expanded)
+        combined_statistics = np.concatenate(
+            [estimands_np, estimands_variance_np], axis=4
+        )
+        spp_array = np.full_like(estimands, expected_samples)
+        spp_array = spp_array[..., np.newaxis]
+        combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=4)
+        np.save("./transient_stats.npy", combined_with_spp)
+        return combined_with_spp
 
     def develop_transient_(self, raw: bool = False):
         if not self.transient_storage:

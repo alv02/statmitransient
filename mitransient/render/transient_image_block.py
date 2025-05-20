@@ -103,7 +103,6 @@ class TransientImageBlock(mi.Object):
         weight: mi.Float,
         active: bool = True,
     ):
-        dr.print(value.shape)
         spec_u = mi.unpolarized_spectrum(value)
 
         if mi.is_spectral:

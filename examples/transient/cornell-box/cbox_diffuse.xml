@@ -1,5 +1,5 @@
 <scene version="3.3.0">
-    <default name="spp" value="256"/>
+    <default name="spp" value="1024"/>
     <default name="res" value="400"/>
     <default name="integrator" value="transient_path"/>
 
@@ -30,9 +30,9 @@
         <film type="transient_hdr_film">
             <integer name="width"  value="$res"/>
             <integer name="height" value="$res"/>
-            <integer name="temporal_bins" value="400"/>
+            <integer name="temporal_bins" value="1"/>
             <float name="start_opl" value="1000"/>
-            <float name="bin_width_opl" value="6.5"/>
+            <float name="bin_width_opl" value="1000000000000"/>
             <rfilter type="box">
               <!-- <float name="stddev" value="1.0"/> -->
             </rfilter>

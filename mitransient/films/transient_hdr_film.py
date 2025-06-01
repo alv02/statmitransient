@@ -137,9 +137,14 @@ class TransientHDRFilm(mi.Film):
         return steady_image, transient_image
 
     def develop_stats_welford(self):
-        mean = self.transient_storage.mean_tensor
-        mean = dr.detach(mean)
-        np.save("./prueba.npy", mean)
+        count = dr.detach(self.transient_storage.count_tensor)
+        values = dr.detach(self.transient_storage.values)
+        index = dr.detach(self.transient_storage.index)
+        active = dr.detach(self.transient_storage.active)
+        np.save("./count.npy", count)
+        np.save("./values.npy", values)
+        np.save("./index.npy", index)
+        np.save("./active.npy", active)
 
     def develop_stats(self):
         count = self.transient_storage.count_tensor

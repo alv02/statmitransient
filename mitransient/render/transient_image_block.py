@@ -85,7 +85,6 @@ class TransientImageBlock(mi.Object):
 
     def update_stats_welford(self, value, index, active):
         dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1, index, active)
-
         value_bc = self.box_cox(value)
         # Update stats
         mean_i = dr.gather(mi.Float, self.mean_tensor.array, index, active)
@@ -105,7 +104,7 @@ class TransientImageBlock(mi.Object):
         dr.scatter(self.m2_tensor, m2_i, index, active)
         dr.scatter(self.m3_tensor, m3_i, index, active)
 
-    def update_statistics_single_channel(self, value, index, active):
+    def update_statistics_sums(self, value, index, active):
         dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1.0, index, active)
         dr.scatter_reduce(dr.ReduceOp.Add, self.sum_tensor.array, value, index, active)
         dr.scatter_reduce(
@@ -172,11 +171,14 @@ class TransientImageBlock(mi.Object):
             index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
 
             active &= dr.all((0 <= p) & (p < self.size_xyt))
+            self.values = values
+            self.index = index
+            self.active = active
 
             for k in range(self.channel_count):
                 values_bc = self.box_cox(values[k])
                 self.accum(values[k], index + k, active)
-                # self.update_statistics_single_channel(values_bc, index + k, active)
+                # self.update_statistics_sums(values_bc, index + k, active)
                 self.update_stats_welford(values[k], index + k, active)
         else:
             mi.Log(

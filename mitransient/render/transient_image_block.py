@@ -78,8 +78,7 @@ class TransientImageBlock(mi.Object):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
 
     def box_cox(self, value: mi.Float, lam=0.5):
-        # Le quitamos el sample_scale
-        return dr.log(value) if lam == 0 else ((dr.power(value * 32, lam) - 1) / lam)
+        return dr.log(value) if lam == 0 else ((dr.power(value, lam) - 1) / lam)
 
     def update_statistics_accum(self, value, index, active):
         dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1.0, index, active)

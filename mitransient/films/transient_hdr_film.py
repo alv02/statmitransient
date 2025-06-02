@@ -162,43 +162,41 @@ class TransientHDRFilm(mi.Film):
         sum1 = self.transient_storage.sum_tensor
         sum2 = self.transient_storage.sum2_tensor
         sum3 = self.transient_storage.sum3_tensor
-        count = count[..., :3]
-        sum1 = sum1[..., :3]
-        sum2 = sum2[..., :3]
-        sum3 = sum3[..., :3]
+
         expected_samples = total_spp
         missing = expected_samples - count
 
         # Box-Cox of zero (0 transformed)
-        # box_cox_zero = self.transient_storage.box_cox(0.0)
+        box_cox_zero = self.transient_storage.box_cox(0.0)
 
         # Fill accumulators with zeros
-        # sum1 += (missing * box_cox_zero) / expected_samples
-        # sum2 += (missing * box_cox_zero**2) / expected_samples
-        # sum3 += (missing * box_cox_zero**3) / expected_samples
-        count = count + missing
-        # Esto se debe a que los valores que se metían ya estaban escalados
+        sum1 += missing * box_cox_zero
+        sum2 += missing * box_cox_zero**2
+        sum3 += missing * box_cox_zero**3
+        count += missing
 
         # Mean
-        mu = sum1 / count
-        np.save("./mean_2.npy", mu)
-
+        mu = sum1 / count  # Variance with Bessel correction
         var = (sum2 - sum1**2 / count) / (count - 1)
 
         # Skewness (M3)
         m3 = (sum3 - 3 * sum1 * sum2 / count + 2 * (sum1**3) / (count**2)) / count
+
         # When the variance is 0 there is no need for skewness correction
-        estimands = np.where(var == 0, mu, mu + m3 / (6 * var * count))
-        estimands_variance = var / count
+        estimands = np.where(var == 0, mu, mu + m3 / (6 * var * expected_samples))
+        estimands_variance = var / expected_samples
+        estimands = estimands[..., :3]
+        estimands_variance = estimands_variance[..., :3]
         estimands_expanded = estimands[..., dr.newaxis]
         estimands_variance_expanded = estimands_variance[..., dr.newaxis]
+        estimands_np = dr.detach(estimands_expanded)
+        estimands_variance_np = dr.detach(estimands_variance_expanded)
         combined_statistics = np.concatenate(
-            [estimands_expanded, estimands_variance_expanded], axis=4
+            [estimands_np, estimands_variance_np], axis=4
         )
-        count_expanded = count[..., dr.newaxis]
-        combined_with_spp = np.concatenate(
-            [combined_statistics, count_expanded], axis=4
-        )
+        spp_array = np.full_like(estimands, expected_samples)
+        spp_array = spp_array[..., np.newaxis]
+        combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=4)
         np.save("./transient_stats.npy", combined_with_spp)
         return combined_with_spp
 

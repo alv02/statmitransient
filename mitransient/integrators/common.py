@@ -172,7 +172,7 @@ class TransientADIntegrator(ADIntegrator):
                 if progress_callback:
                     progress_callback((i + 1) / len(samplers_spps))
 
-            steady_image, transient_image = film.develop()
+            steady_image, transient_image = film.develop(total_spp=total_spp)
             return steady_image, transient_image
 
     def render_forward(

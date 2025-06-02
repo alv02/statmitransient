@@ -63,13 +63,10 @@ class TransientImageBlock(mi.Object):
         self.tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         # Compensation is not implented: https://github.com/mitsuba-renderer/mitsuba3/blob/b2ec619c7ba612edb1cf820463b32e5a334d8471/src/render/imageblock.cpp#L80
 
-        self.count_tensor = mi.TensorXf(dr.zeros(mi.UInt32, size_flat), shape)
+        self.count_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum3_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
-        self.mean_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
-        self.m2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
-        self.m3_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
 
     def set_size(self, size_xyt: mi.ScalarVector3u):
         if dr.all(size_xyt == self.size_xyt):
@@ -81,39 +78,19 @@ class TransientImageBlock(mi.Object):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
 
     def box_cox(self, value: mi.Float, lam=0.5):
-        return dr.log(value) if lam == 0 else ((dr.power(value, lam) - 1) / lam)
+        # Le quitamos el sample_scale
+        return dr.log(value) if lam == 0 else ((dr.power(value * 32, lam) - 1) / lam)
 
-    def update_stats_welford(self, value, index, active):
-        dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1, index, active)
-        value_bc = self.box_cox(value)
-        # Update stats
-        mean_i = dr.gather(mi.Float, self.mean_tensor.array, index, active)
-        m2_i = dr.gather(mi.Float, self.m2_tensor.array, index, active)
-        m3_i = dr.gather(mi.Float, self.m3_tensor.array, index, active)
-        count_i = dr.gather(mi.Float, self.count_tensor.array, index, active)
-
-        delta = value_bc - mean_i
-        mean_i = mean_i + delta / count_i
-        m2_i = m2_i + delta(delta - delta / count_i)
-        m3_i = (
-            m3_i
-            - 3 * (delta / count_i) * m2_i
-            + delta * (delta**2 - (delta / count_i) ** 2)
-        )
-        dr.scatter(self.mean_tensor, mean_i, index, active)
-        dr.scatter(self.m2_tensor, m2_i, index, active)
-        dr.scatter(self.m3_tensor, m3_i, index, active)
-
-    def update_statistics_sums(self, value, index, active):
+    def update_statistics_accum(self, value, index, active):
         dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1.0, index, active)
         dr.scatter_reduce(dr.ReduceOp.Add, self.sum_tensor.array, value, index, active)
         dr.scatter_reduce(
-            dr.ReduceOp.Add, self.sum2_tensor.array, value * value, index, active
+            dr.ReduceOp.Add, self.sum2_tensor.array, value**2, index, active
         )
         dr.scatter_reduce(
             dr.ReduceOp.Add,
             self.sum3_tensor.array,
-            value * value * value,
+            value**3,
             index,
             active,
         )
@@ -178,8 +155,7 @@ class TransientImageBlock(mi.Object):
             for k in range(self.channel_count):
                 values_bc = self.box_cox(values[k])
                 self.accum(values[k], index + k, active)
-                # self.update_statistics_sums(values_bc, index + k, active)
-                self.update_stats_welford(values[k], index + k, active)
+                self.update_statistics_accum(values_bc, index + k, active)
         else:
             mi.Log(
                 mi.LogLevel.Error,

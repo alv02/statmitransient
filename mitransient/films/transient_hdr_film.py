@@ -128,54 +128,77 @@ class TransientHDRFilm(mi.Film):
         if self.transient_storage:
             self.transient_storage.clear()
 
-    def develop(self, raw: bool = False):
+    def develop(self, raw: bool = False, total_spp=0):
         steady_image = self.steady.develop(raw=raw)
         transient_image = self.develop_transient_(raw=raw)
-        self.develop_stats_welford()
+        sats = self.develop_stats(total_spp)
         np.save("./transient_data.npy", transient_image)
 
         return steady_image, transient_image
 
-    def develop_stats_welford(self):
-        count = dr.detach(self.transient_storage.count_tensor)
-        values = dr.detach(self.transient_storage.values)
-        index = dr.detach(self.transient_storage.index)
-        active = dr.detach(self.transient_storage.active)
-        np.save("./count.npy", count)
-        np.save("./values.npy", values)
-        np.save("./index.npy", index)
-        np.save("./active.npy", active)
+    def gather_tensor(self, data):
+        pixel_count = dr.prod(data.shape[0:-1])
+        source_ch = data.shape[-1]
+        # Remove alpha and weight channels
+        alpha = mi.has_flag(self.flags(), mi.FilmFlags.Alpha)
+        target_ch = source_ch - (ScalarInt32(2) if alpha else ScalarInt32(1))
 
-    def develop_stats(self):
+        idx = dr.arange(Int32, pixel_count * target_ch)
+        pixel_idx = idx // target_ch
+        channel_idx = dr.fma(pixel_idx, -target_ch, idx)
+
+        values_idx = dr.fma(pixel_idx, source_ch, channel_idx)
+        weight_idx = dr.fma(pixel_idx, source_ch, source_ch - 1)
+
+        weight = dr.gather(Float, data.array, weight_idx)
+        values_ = dr.gather(Float, data.array, values_idx)
+
+        values = values_ / dr.select((weight == 0.0), 1.0, weight)
+
+        return TensorXf(values_, tuple(list(data.shape[0:-1]) + [target_ch]))
+
+    def develop_stats(self, total_spp):
         count = self.transient_storage.count_tensor
         sum1 = self.transient_storage.sum_tensor
         sum2 = self.transient_storage.sum2_tensor
         sum3 = self.transient_storage.sum3_tensor
+        count = count[..., :3]
+        sum1 = sum1[..., :3]
+        sum2 = sum2[..., :3]
+        sum3 = sum3[..., :3]
+        expected_samples = total_spp
+        missing = expected_samples - count
+
+        # Box-Cox of zero (0 transformed)
+        # box_cox_zero = self.transient_storage.box_cox(0.0)
+
+        # Fill accumulators with zeros
+        # sum1 += (missing * box_cox_zero) / expected_samples
+        # sum2 += (missing * box_cox_zero**2) / expected_samples
+        # sum3 += (missing * box_cox_zero**3) / expected_samples
+        count = count + missing
+        # Esto se debe a que los valores que se metían ya estaban escalados
+
         # Mean
-        mu = sum1 / count  # Variance with Bessel correction
+        mu = sum1 / count
+        np.save("./mean_2.npy", mu)
+
         var = (sum2 - sum1**2 / count) / (count - 1)
 
         # Skewness (M3)
         m3 = (sum3 - 3 * sum1 * sum2 / count + 2 * (sum1**3) / (count**2)) / count
-
         # When the variance is 0 there is no need for skewness correction
         estimands = np.where(var == 0, mu, mu + m3 / (6 * var * count))
         estimands_variance = var / count
-        estimands = estimands[..., :3]
-        estimands_variance = estimands_variance[..., :3]
         estimands_expanded = estimands[..., dr.newaxis]
         estimands_variance_expanded = estimands_variance[..., dr.newaxis]
-        estimands_np = dr.detach(estimands_expanded)
-        estimands_variance_np = dr.detach(estimands_variance_expanded)
         combined_statistics = np.concatenate(
-            [estimands_np, estimands_variance_np], axis=4
+            [estimands_expanded, estimands_variance_expanded], axis=4
         )
-        count = count[..., :3]
         count_expanded = count[..., dr.newaxis]
-        spp_array = dr.detach(count_expanded)
-        print(spp_array.shape)
-        print(combined_statistics.shape)
-        combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=4)
+        combined_with_spp = np.concatenate(
+            [combined_statistics, count_expanded], axis=4
+        )
         np.save("./transient_stats.npy", combined_with_spp)
         return combined_with_spp
 

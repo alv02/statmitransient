@@ -15,8 +15,8 @@ import os
 
 import mitransient as mitr
 
-scene = mi.load_file(os.path.abspath('cornell-box/cbox_diffuse.xml'))
-data_steady, data_transient = mi.render(scene, spp=1024)
+scene = mi.load_file(os.path.abspath("cornell-box/cbox_diffuse.xml"))
+data_steady, data_transient = mi.render(scene, spp=32)
 
 
 # Plot the computed steady image

@@ -68,6 +68,12 @@ class TransientImageBlock(mi.Object):
         self.sum2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum3_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
 
+        # Los samples son cada contribucion del rayo no los spp
+        self.count_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        self.sum1_tensor_ = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        self.sum2_tensor_ = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        self.sum3_tensor_ = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+
     def set_size(self, size_xyt: mi.ScalarVector3u):
         if dr.all(size_xyt == self.size_xyt):
             return
@@ -76,6 +82,18 @@ class TransientImageBlock(mi.Object):
 
     def accum(self, value: mi.Float, index: mi.UInt32, active: mi.Bool):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
+
+        value_bc = self.box_cox(value * 32, 1.5)
+        dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1, index, active)
+        dr.scatter_reduce(
+            dr.ReduceOp.Add, self.sum1_tensor_.array, value_bc, index, active
+        )
+        dr.scatter_reduce(
+            dr.ReduceOp.Add, self.sum2_tensor_.array, value_bc**2, index, active
+        )
+        dr.scatter_reduce(
+            dr.ReduceOp.Add, self.sum3_tensor_.array, value_bc**3, index, active
+        )
 
     def box_cox(self, samples, lam=0.5):
         return dr.log(samples) if lam == 0 else ((dr.power(samples, lam) - 1) / lam)

@@ -131,7 +131,7 @@ class TransientHDRFilm(mi.Film):
     def develop(self, raw: bool = False, total_spp=0):
         steady_image = self.steady.develop(raw=raw)
         transient_image = self.develop_transient_(raw=raw)
-        sats = self.develop_stats(total_spp)
+        stats = self.develop_stats_(total_spp)
         np.save("./transient_data.npy", transient_image)
 
         return steady_image, transient_image
@@ -169,7 +169,6 @@ class TransientHDRFilm(mi.Film):
         # Varianza muestral con Bessel
         var = (sum2 - (total_spp * mu**2)) / (total_spp - 1)
 
-        # Momento central de orden 3 (no tipificado aún)
         m3 = (sum3 - 3 * mu * sum2 + 2 * mu**3 * total_spp) / total_spp
 
         # Skewness muestral con corrección
@@ -195,6 +194,74 @@ class TransientHDRFilm(mi.Film):
         estimands_np = dr.detach(estimands_expanded)
         estimands_variance_np = dr.detach(estimands_variance_expanded)
         total_spp_np = np.full_like(estimands_np, total_spp)
+
+        combined_statistics = np.concatenate(
+            [estimands_np, estimands_variance_np, total_spp_np], axis=4
+        )
+        np.save("./transient_stats.npy", combined_statistics)
+        return combined_statistics
+
+    def develop_stats_(self, total_spp):
+        count = dr.detach(self.gather_tensor(self.transient_storage.count_tensor))
+        sum1 = dr.detach(self.gather_tensor(self.transient_storage.sum1_tensor_))
+        sum2 = dr.detach(self.gather_tensor(self.transient_storage.sum2_tensor_))
+        sum3 = dr.detach(self.gather_tensor(self.transient_storage.sum3_tensor_))
+        count = np.array(count)
+        sum1 = np.array(sum1)
+        sum2 = np.array(sum2)
+        sum3 = np.array(sum3)
+        # TODO: Esto esta mal, provisional
+
+        total_spp = np.where(count == 0, 32, count)
+
+        mu = sum1 / total_spp
+        print(
+            "Max Min mu ",
+            mu.min(),
+            " ",
+            mu.max(),
+        )
+        denom = total_spp - 1
+        denom = np.where(denom <= 0, 1, denom)  # evita división por cero
+        var = (sum2 - (total_spp * mu**2)) / denom
+        var = np.where(var <= 1e-5, 0, var)
+        m3 = (sum3 / total_spp) - 3 * mu * var - mu**3
+
+        # Máscara para evitar divisiones inválidas
+        valid = (var > 0) & (total_spp > 2)
+
+        # Inicializamos skewness como 0
+        skewness = np.zeros_like(var)
+        # Solo calculamos donde es válido
+        skewness[valid] = (
+            total_spp[valid] / ((total_spp[valid] - 1) * (total_spp[valid] - 2))
+        ) * (m3[valid] / (var[valid] ** 1.5))
+
+        # estimands: protegemos contra división por 0 también
+        valid_estimands = valid & (count > 0)
+        estimands = np.copy(mu)
+        estimands[valid_estimands] = mu[valid_estimands] + skewness[valid_estimands] / (
+            6 * var[valid_estimands] * count[valid_estimands]
+        )
+
+        estimands_variance = var / total_spp
+        print("Min Max estimands: ", estimands.min(), " ", estimands.max())
+        print(
+            "Min Max estmiands variance: ",
+            estimands_variance.min(),
+            " ",
+            estimands_variance.max(),
+        )
+
+        estimands_expanded = estimands[..., dr.newaxis]
+        estimands_variance_expanded = estimands_variance[..., dr.newaxis]
+        count_expanded = total_spp[..., dr.newaxis]
+
+        # Crear tensor total_spp con la misma forma que estimands
+
+        estimands_np = dr.detach(estimands_expanded)
+        estimands_variance_np = dr.detach(estimands_variance_expanded)
+        total_spp_np = dr.detach(count_expanded)
 
         combined_statistics = np.concatenate(
             [estimands_np, estimands_variance_np, total_spp_np], axis=4

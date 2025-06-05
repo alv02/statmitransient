@@ -175,7 +175,7 @@ class TransientADIntegrator(ADIntegrator):
                 if progress_callback:
                     progress_callback((i + 1) / len(samplers_spps))
 
-            # film.add_stats_data(None, None, total_spp)
+            # film.update_sample_stats(None, None, total_spp)
 
             steady_image, transient_image = film.develop(total_spp=total_spp)
             return steady_image, transient_image

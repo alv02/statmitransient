@@ -79,6 +79,7 @@ class TransientPath(TransientADIntegrator):
         add_transient: Callable[
             [mi.Spectrum, mi.Float, mi.UnpolarizedSpectrum, mi.Mask], None
         ],
+        update_stats: Callable[[mi.Mask], None],
         **kwargs,  # Absorbs unused arguments
     ) -> Tuple[mi.Spectrum, mi.Bool, List[mi.Float], mi.Spectrum]:
         """
@@ -294,6 +295,8 @@ class TransientPath(TransientADIntegrator):
 
             depth[si.is_valid()] += 1
             active = active_next
+
+        update_stats(active)
 
         return (
             L if primal else δL,  # Radiance/differential radiance

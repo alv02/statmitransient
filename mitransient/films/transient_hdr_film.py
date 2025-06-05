@@ -148,57 +148,59 @@ class TransientHDRFilm(mi.Film):
         channel_idx = dr.fma(pixel_idx, -target_ch, idx)
 
         values_idx = dr.fma(pixel_idx, source_ch, channel_idx)
-        weight_idx = dr.fma(pixel_idx, source_ch, source_ch - 1)
 
-        weight = dr.gather(Float, data.array, weight_idx)
         values_ = dr.gather(Float, data.array, values_idx)
-
-        values = values_ / dr.select((weight == 0.0), 1.0, weight)
 
         return TensorXf(values_, tuple(list(data.shape[0:-1]) + [target_ch]))
 
     def develop_stats(self, total_spp):
-        count = self.transient_storage.count_tensor
-        sum1 = self.transient_storage.sum_tensor
-        sum2 = self.transient_storage.sum2_tensor
-        sum3 = self.transient_storage.sum3_tensor
+        sum1 = self.gather_tensor(self.transient_storage.sum1_tensor)
+        sum2 = self.gather_tensor(self.transient_storage.sum2_tensor)
+        sum3 = self.gather_tensor(self.transient_storage.sum3_tensor)
 
-        expected_samples = total_spp
-        missing = expected_samples - count
+        mu = sum1 / total_spp
+        print(
+            "Max Min mu ",
+            dr.min(mu),
+            " ",
+            dr.max(mu),
+        )
 
-        # Box-Cox of zero (0 transformed)
-        box_cox_zero = self.transient_storage.box_cox(0.0)
+        # Varianza muestral con Bessel
+        var = (sum2 - (total_spp * mu**2)) / (total_spp - 1)
 
-        # Fill accumulators with zeros
-        sum1 += missing * box_cox_zero
-        sum2 += missing * box_cox_zero**2
-        sum3 += missing * box_cox_zero**3
-        count += missing
+        # Momento central de orden 3 (no tipificado aún)
+        m3 = (sum3 - 3 * mu * sum2 + 2 * mu**3 * total_spp) / total_spp
 
-        # Mean
-        mu = sum1 / count  # Variance with Bessel correction
-        var = (sum2 - sum1**2 / count) / (count - 1)
-
-        # Skewness (M3)
-        m3 = (sum3 - 3 * sum1 * sum2 / count + 2 * (sum1**3) / (count**2)) / count
+        # Skewness muestral con corrección
+        skewness = (total_spp / ((total_spp - 1) * (total_spp - 2))) * (m3 / var**3)
 
         # When the variance is 0 there is no need for skewness correction
-        estimands = np.where(var == 0, mu, mu + m3 / (6 * var * expected_samples))
-        estimands_variance = var / expected_samples
-        estimands = estimands[..., :3]
-        estimands_variance = estimands_variance[..., :3]
+        estimands = np.where(var == 0, mu, mu)
+
+        estimands_variance = var / total_spp
+        print("Min Max estimands: ", estimands.min(), " ", estimands.max())
+        print(
+            "Min Max estmiands variance: ",
+            dr.min(estimands_variance),
+            " ",
+            dr.max(estimands_variance),
+        )
+
         estimands_expanded = estimands[..., dr.newaxis]
         estimands_variance_expanded = estimands_variance[..., dr.newaxis]
+
+        # Crear tensor total_spp con la misma forma que estimands
+
         estimands_np = dr.detach(estimands_expanded)
         estimands_variance_np = dr.detach(estimands_variance_expanded)
+        total_spp_np = np.full_like(estimands_np, total_spp)
+
         combined_statistics = np.concatenate(
-            [estimands_np, estimands_variance_np], axis=4
+            [estimands_np, estimands_variance_np, total_spp_np], axis=4
         )
-        spp_array = np.full_like(estimands, expected_samples)
-        spp_array = spp_array[..., np.newaxis]
-        combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=4)
-        np.save("./transient_stats.npy", combined_with_spp)
-        return combined_with_spp
+        np.save("./transient_stats.npy", combined_statistics)
+        return combined_statistics
 
     def develop_transient_(self, raw: bool = False):
         if not self.transient_storage:
@@ -264,6 +266,9 @@ class TransientHDRFilm(mi.Film):
             weight=mi.Float(0.0),
             active=active & mask,
         )
+
+    def update_sample_stats(self, pos: mi.Vector2f, active: mi.Bool, total_spp):
+        self.transient_storage.update_sample_stats(pos, active, total_spp)
 
     def to_string(self):
         string = "TransientHDRFilm[\n"

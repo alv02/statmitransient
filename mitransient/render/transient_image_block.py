@@ -63,8 +63,8 @@ class TransientImageBlock(mi.Object):
         self.tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         # Compensation is not implented: https://github.com/mitsuba-renderer/mitsuba3/blob/b2ec619c7ba612edb1cf820463b32e5a334d8471/src/render/imageblock.cpp#L80
 
-        self.count_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
-        self.sum_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        self.sample_sum = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        self.sum1_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum3_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
 
@@ -77,22 +77,27 @@ class TransientImageBlock(mi.Object):
     def accum(self, value: mi.Float, index: mi.UInt32, active: mi.Bool):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
 
-    def box_cox(self, value: mi.Float, lam=0.5):
-        return dr.log(value) if lam == 0 else ((dr.power(value, lam) - 1) / lam)
+    def box_cox(self, samples, lam=0.5):
+        return dr.log(samples) if lam == 0 else ((dr.power(samples, lam) - 1) / lam)
 
     def update_statistics_accum(self, value, index, active):
-        dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1.0, index, active)
-        dr.scatter_reduce(dr.ReduceOp.Add, self.sum_tensor.array, value, index, active)
-        dr.scatter_reduce(
-            dr.ReduceOp.Add, self.sum2_tensor.array, value**2, index, active
+        dr.scatter_reduce(dr.ReduceOp.Add, self.sample_sum.array, value, index, active)
+
+    def update_sample_stats(self, pos: mi.Vector2f, active: mi.Bool, total_spp):
+        sample_bc = self.box_cox(self.sample_sum * total_spp)
+        self.sum1_tensor += sample_bc
+        self.sum2_tensor += sample_bc**2
+        self.sum3_tensor += sample_bc**3
+
+        # TODO: Mejorar esto
+        border_size_ScalarPoint3 = mi.ScalarVector3u(
+            self.border_size, self.border_size, 0
         )
-        dr.scatter_reduce(
-            dr.ReduceOp.Add,
-            self.sum3_tensor.array,
-            value**3,
-            index,
-            active,
-        )
+        size_ext = self.size_xyt + 2 * border_size_ScalarPoint3
+
+        size_flat = self.channel_count * dr.prod(size_ext)
+        shape = (size_ext.y, size_ext.x, size_ext.z, self.channel_count)
+        self.sample_sum = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
 
     def put(
         self,
@@ -152,9 +157,8 @@ class TransientImageBlock(mi.Object):
             self.active = active
 
             for k in range(self.channel_count):
-                values_bc = self.box_cox(values[k])
                 self.accum(values[k], index + k, active)
-                self.update_statistics_accum(values_bc, index + k, active)
+                self.update_statistics_accum(values[k], index + k, active)
         else:
             mi.Log(
                 mi.LogLevel.Error,

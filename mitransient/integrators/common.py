@@ -142,6 +142,9 @@ class TransientADIntegrator(ADIntegrator):
                         ray_weight=weight,
                         sample_scale=1.0 / total_spp,
                     ),
+                    update_stats=self.update_stats_f(
+                        film=film, pos=pos, total_spp=total_spp
+                    ),
                 )
 
                 # Prepare an ImageBlock as specified by the film
@@ -171,6 +174,8 @@ class TransientADIntegrator(ADIntegrator):
                 # Report progress
                 if progress_callback:
                     progress_callback((i + 1) / len(samplers_spps))
+
+            # film.add_stats_data(None, None, total_spp)
 
             steady_image, transient_image = film.develop(total_spp=total_spp)
             return steady_image, transient_image
@@ -216,6 +221,9 @@ class TransientADIntegrator(ADIntegrator):
         return lambda spec, distance, wavelengths, active: film.add_transient_data(
             pos, distance, wavelengths, spec * sample_scale, ray_weight, active
         )
+
+    def update_stats_f(self, film: TransientHDRFilm, pos: mi.Vector2f, total_spp):
+        return lambda active: film.update_sample_stats(pos, active, total_spp)
 
     def check_transient_(self, scene: mi.Scene, sensor: mi.Sensor):
         if isinstance(sensor, int):

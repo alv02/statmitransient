@@ -49,7 +49,7 @@ class TransientADIntegrator(ADIntegrator):
             film_size += 2 * film.rfilter().border_size()
 
         wavefront_size = dr.prod(film_size) * spp
-        film.prepare(aovs)
+        film.prepare(aovs, spp)
 
         if wavefront_size <= 2**32:
             sampler.seed(seed, wavefront_size)
@@ -143,7 +143,8 @@ class TransientADIntegrator(ADIntegrator):
                         sample_scale=1.0 / total_spp,
                     ),
                     update_stats=self.update_stats_f(
-                        film=film, pos=pos, total_spp=total_spp
+                        film=film,
+                        pos=pos,
                     ),
                 )
 
@@ -222,8 +223,15 @@ class TransientADIntegrator(ADIntegrator):
             pos, distance, wavelengths, spec * sample_scale, ray_weight, active
         )
 
-    def update_stats_f(self, film: TransientHDRFilm, pos: mi.Vector2f, total_spp):
-        return lambda active: film.update_sample_stats(pos, active, total_spp)
+    def update_stats_f(
+        self,
+        film: TransientHDRFilm,
+        pos: mi.Vector2f,
+    ):
+        return lambda active: film.update_stats(
+            pos,
+            active,
+        )
 
     def check_transient_(self, scene: mi.Scene, sensor: mi.Sensor):
         if isinstance(sensor, int):

@@ -122,6 +122,7 @@ class TransientPath(TransientADIntegrator):
             active,
             max_iterations=self.max_depth,
             label="Transient Path (%s)" % mode.name,
+            mode="evaluated",
         ):
             active_next = mi.Bool(active)
 
@@ -198,7 +199,6 @@ class TransientPath(TransientADIntegrator):
 
             # Add contribution direct emitter sampling
             add_transient(Lr_dir, distance + ds.dist * η, ray.wavelengths, active)
-
             # ------------------ Detached BSDF sampling -------------------
 
             bsdf_sample, bsdf_weight = bsdf.sample(
@@ -234,7 +234,6 @@ class TransientPath(TransientADIntegrator):
             β[rr_active] *= dr.rcp(rr_prob) & (rr_prob > 0)
             rr_continue = sampler.next_1d() < rr_prob
             active_next &= ~rr_active | rr_continue
-
             # ------------------ Differential phase only ------------------
 
             if dr.hint(not primal, mode="scalar"):

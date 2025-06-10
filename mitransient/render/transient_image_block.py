@@ -21,6 +21,7 @@ class TransientImageBlock(mi.Object):
         offset_xyt: mi.ScalarPoint3i,
         channel_count: int,
         rfilter: mi.ReconstructionFilter,
+        spp,
         border: bool = False,
         # normalize: bool = False,
         # coalesce: bool = False,
@@ -40,6 +41,7 @@ class TransientImageBlock(mi.Object):
         # self.compensate = compensate
         self.warn_negative = warn_negative
         self.warn_invalid = warn_invalid
+        self.spp = spp
 
         if rfilter and rfilter.is_box_filter():
             self.rfilter = None
@@ -62,17 +64,11 @@ class TransientImageBlock(mi.Object):
 
         self.tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         # Compensation is not implented: https://github.com/mitsuba-renderer/mitsuba3/blob/b2ec619c7ba612edb1cf820463b32e5a334d8471/src/render/imageblock.cpp#L80
+        self.sample_value = [dr.zeros(mi.Float) for _ in range(self.channel_count)]
 
-        self.sample_sum = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum1_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum3_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
-
-        # Los samples son cada contribucion del rayo no los spp
-        self.count_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
-        self.sum1_tensor_ = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
-        self.sum2_tensor_ = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
-        self.sum3_tensor_ = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
 
     def set_size(self, size_xyt: mi.ScalarVector3u):
         if dr.all(size_xyt == self.size_xyt):
@@ -83,39 +79,27 @@ class TransientImageBlock(mi.Object):
     def accum(self, value: mi.Float, index: mi.UInt32, active: mi.Bool):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
 
-        value_bc = self.box_cox(value * 32, 1.5)
-        dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1, index, active)
-        dr.scatter_reduce(
-            dr.ReduceOp.Add, self.sum1_tensor_.array, value_bc, index, active
-        )
-        dr.scatter_reduce(
-            dr.ReduceOp.Add, self.sum2_tensor_.array, value_bc**2, index, active
-        )
-        dr.scatter_reduce(
-            dr.ReduceOp.Add, self.sum3_tensor_.array, value_bc**3, index, active
-        )
-
     def box_cox(self, samples, lam=0.5):
         return dr.log(samples) if lam == 0 else ((dr.power(samples, lam) - 1) / lam)
 
-    def update_statistics_accum(self, value, index, active):
-        dr.scatter_reduce(dr.ReduceOp.Add, self.sample_sum.array, value, index, active)
+    def update_stats(self, pos: mi.Vector2f, active: mi.Bool):
+        p = mi.Point3u(self.sample_pos.x, self.sample_pos.y, self.sample_transient_pos)
 
-    def update_sample_stats(self, pos: mi.Vector2f, active: mi.Bool, total_spp):
-        sample_bc = self.box_cox(self.sample_sum * total_spp)
-        self.sum1_tensor += sample_bc
-        self.sum2_tensor += sample_bc**2
-        self.sum3_tensor += sample_bc**3
+        index = dr.fma(p.y, self.size_xyt.x, p.x)
+        index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
+        active &= dr.all((0 <= p) & (p < self.size_xyt))
 
-        # TODO: Mejorar esto
-        border_size_ScalarPoint3 = mi.ScalarVector3u(
-            self.border_size, self.border_size, 0
-        )
-        size_ext = self.size_xyt + 2 * border_size_ScalarPoint3
-
-        size_flat = self.channel_count * dr.prod(size_ext)
-        shape = (size_ext.y, size_ext.x, size_ext.z, self.channel_count)
-        self.sample_sum = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        for k in range(self.channel_count):
+            sample_bc = self.box_cox(self.sample_value[k])
+            dr.scatter_reduce(
+                dr.ReduceOp.Add, self.sum1_tensor.array, sample_bc, index + k
+            )
+            dr.scatter_reduce(
+                dr.ReduceOp.Add, self.sum2_tensor.array, sample_bc**2, index + k
+            )
+            dr.scatter_reduce(
+                dr.ReduceOp.Add, self.sum3_tensor.array, sample_bc**3, index + k
+            )
 
     def put(
         self,
@@ -170,13 +154,13 @@ class TransientImageBlock(mi.Object):
             index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
 
             active &= dr.all((0 <= p) & (p < self.size_xyt))
-            self.values = values
-            self.index = index
-            self.active = active
 
             for k in range(self.channel_count):
                 self.accum(values[k], index + k, active)
-                self.update_statistics_accum(values[k], index + k, active)
+                self.sample_value[k] += values[k] * self.spp
+            self.sample_pos = mi.Point2u(pos.x, pos.y)
+            self.sample_transient_pos = pos.z
+
         else:
             mi.Log(
                 mi.LogLevel.Error,

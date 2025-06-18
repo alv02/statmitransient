@@ -65,7 +65,12 @@ class TransientImageBlock(mi.Object):
         self.tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         # Compensation is not implented: https://github.com/mitsuba-renderer/mitsuba3/blob/b2ec619c7ba612edb1cf820463b32e5a334d8471/src/render/imageblock.cpp#L80
         self.sample_value = [dr.zeros(mi.Float) for _ in range(self.channel_count)]
+        # TODO: Harcodeado esto usar el size de bins quiza + num o algo
+        self.sample_transient_pos = dr.full(mi.UInt32, 1000)
 
+        self.sample_pos = mi.Point2u(0, 0)
+
+        self.count_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum1_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum3_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
@@ -82,23 +87,34 @@ class TransientImageBlock(mi.Object):
     def box_cox(self, samples, lam=0.5):
         return dr.log(samples) if lam == 0 else ((dr.power(samples, lam) - 1) / lam)
 
-    def update_stats(self, pos: mi.Vector2f, active: mi.Bool):
+    def update_stats(self, to_update: mi.Bool):
         p = mi.Point3u(self.sample_pos.x, self.sample_pos.y, self.sample_transient_pos)
 
         index = dr.fma(p.y, self.size_xyt.x, p.x)
         index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
-        active &= dr.all((0 <= p) & (p < self.size_xyt))
+        to_update &= dr.all((0 <= p) & (p < self.size_xyt))
 
         for k in range(self.channel_count):
             sample_bc = self.box_cox(self.sample_value[k])
             dr.scatter_reduce(
-                dr.ReduceOp.Add, self.sum1_tensor.array, sample_bc, index + k
+                dr.ReduceOp.Add, self.sum1_tensor.array, sample_bc, index + k, to_update
             )
             dr.scatter_reduce(
-                dr.ReduceOp.Add, self.sum2_tensor.array, sample_bc**2, index + k
+                dr.ReduceOp.Add, self.count_tensor.array, 1.0, index + k, to_update
             )
             dr.scatter_reduce(
-                dr.ReduceOp.Add, self.sum3_tensor.array, sample_bc**3, index + k
+                dr.ReduceOp.Add,
+                self.sum2_tensor.array,
+                sample_bc**2,
+                index + k,
+                to_update,
+            )
+            dr.scatter_reduce(
+                dr.ReduceOp.Add,
+                self.sum3_tensor.array,
+                sample_bc**3,
+                index + k,
+                to_update,
             )
 
     def put(
@@ -157,9 +173,36 @@ class TransientImageBlock(mi.Object):
 
             for k in range(self.channel_count):
                 self.accum(values[k], index + k, active)
-                self.sample_value[k] += values[k] * self.spp
-            self.sample_pos = mi.Point2u(pos.x, pos.y)
-            self.sample_transient_pos = pos.z
+
+            # Update sample position
+            self.sample_pos = mi.Point2u(p.x, p.y)
+
+            # Check if we need to update stats - this should be False for single temporal bin
+            current_bin = p.z
+            to_update = (
+                active
+                & (current_bin < self.size_xyt.z)
+                & (self.sample_transient_pos < current_bin)
+            )
+
+            print("Current bin:", current_bin)
+            print("Sample transient pos:", self.sample_transient_pos)
+            print("Size z:", self.size_xyt.z)
+            print("True count:", dr.count(to_update))
+            print("False count:", dr.count(~to_update))
+
+            self.update_stats(to_update)
+            for k in range(self.channel_count):
+                self.sample_value[k] += dr.select(
+                    active & ~to_update, values[k] * self.spp, 0
+                )
+                self.sample_value[k] = dr.select(to_update, 0, self.sample_value[k])
+            # Update transient position
+            self.sample_transient_pos = dr.select(
+                (current_bin < self.size_xyt.z),
+                current_bin,
+                self.sample_transient_pos,
+            )
 
         else:
             mi.Log(
@@ -173,9 +216,10 @@ class TransientImageBlock(mi.Object):
         string += f"  size_xyt = {self.size_xyt}, \n"
         string += f"  channel_count = {self.channel_count}, \n"
         string += f"  border_size = {self.border_size}, \n"
-        string += f"  normalize = {self.normalize}, \n"
-        string += f"  coalesce = {self.coalesce}, \n"
-        string += f"  compensate = {self.compensate}, \n"
+        # Fix: These attributes don't exist, comment them out or add them
+        # string += f"  normalize = {self.normalize}, \n"
+        # string += f"  coalesce = {self.coalesce}, \n"
+        # string += f"  compensate = {self.compensate}, \n"
         string += f"  warn_negative = {self.warn_negative}, \n"
         string += f"  warn_invalid = {self.warn_invalid}, \n"
         if self.rfilter:

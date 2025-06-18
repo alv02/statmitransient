@@ -295,7 +295,8 @@ class TransientPath(TransientADIntegrator):
             depth[si.is_valid()] += 1
             active = active_next
 
-        update_stats(active)
+        # Queremos actualizar todos los samples
+        update_stats(mi.Bool(True))
 
         return (
             L if primal else δL,  # Radiance/differential radiance

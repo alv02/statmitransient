@@ -174,7 +174,8 @@ class TransientImageBlock(mi.Object):
             for k in range(self.channel_count):
                 self.accum(values[k], index + k, active)
 
-            # Update sample position
+            # Parte de estadísticas
+            # TODO: Esto creo que tendria que ir con un select
             self.sample_pos = mi.Point2u(p.x, p.y)
 
             # Check if we need to update stats - this should be False for single temporal bin
@@ -185,6 +186,7 @@ class TransientImageBlock(mi.Object):
                 & (self.sample_transient_pos < current_bin)
             )
 
+            print(dr.shape(active))
             print("Current bin:", current_bin)
             print("Sample transient pos:", self.sample_transient_pos)
             print("Size z:", self.size_xyt.z)
@@ -193,10 +195,10 @@ class TransientImageBlock(mi.Object):
 
             self.update_stats(to_update)
             for k in range(self.channel_count):
-                self.sample_value[k] += dr.select(
-                    active & ~to_update, values[k] * self.spp, 0
-                )
+                # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
                 self.sample_value[k] = dr.select(to_update, 0, self.sample_value[k])
+                # En caso de que el camino siga activo sumar la nueva contribucion
+                self.sample_value[k] += dr.select(active, values[k] * self.spp, 0)
             # Update transient position
             self.sample_transient_pos = dr.select(
                 (current_bin < self.size_xyt.z),

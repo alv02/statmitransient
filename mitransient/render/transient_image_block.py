@@ -66,7 +66,7 @@ class TransientImageBlock(mi.Object):
         # Compensation is not implented: https://github.com/mitsuba-renderer/mitsuba3/blob/b2ec619c7ba612edb1cf820463b32e5a334d8471/src/render/imageblock.cpp#L80
         self.sample_value = [dr.zeros(mi.Float) for _ in range(self.channel_count)]
         # TODO: Harcodeado esto usar el size de bins quiza + num o algo
-        self.sample_transient_pos = dr.full(mi.UInt32, 1000)
+        self.sample_transient_pos = dr.full(mi.UInt32, self.size_xyt.z)
 
         self.sample_pos = mi.Point2u(0, 0)
 
@@ -93,7 +93,13 @@ class TransientImageBlock(mi.Object):
         index = dr.fma(p.y, self.size_xyt.x, p.x)
         index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
         to_update &= dr.all((0 <= p) & (p < self.size_xyt))
-
+        pos_reshaped = dr.reshape(
+            dtype=mi.TensorXf,
+            value=p,
+            shape=(3, self.size_xyt.y, self.size_xyt.x, self.spp),
+            order="C",
+        )
+        dr.print("Positions of pyxel: {}", pos_reshaped[2, 324, 41, :], limit=100)
         for k in range(self.channel_count):
             sample_bc = self.box_cox(self.sample_value[k])
             dr.scatter_reduce(
@@ -186,12 +192,11 @@ class TransientImageBlock(mi.Object):
                 & (self.sample_transient_pos < current_bin)
             )
 
-            print(dr.shape(active))
-            print("Current bin:", current_bin)
-            print("Sample transient pos:", self.sample_transient_pos)
-            print("Size z:", self.size_xyt.z)
-            print("True count:", dr.count(to_update))
-            print("False count:", dr.count(~to_update))
+            # print("Current bin:", current_bin)
+            # print("Sample transient pos:", self.sample_transient_pos)
+            # print("Size z:", self.size_xyt.z)
+            # print("True count:", dr.count(to_update))
+            # print("False count:", dr.count(~to_update))
 
             self.update_stats(to_update)
             for k in range(self.channel_count):
@@ -201,7 +206,11 @@ class TransientImageBlock(mi.Object):
                 self.sample_value[k] += dr.select(active, values[k] * self.spp, 0)
             # Update transient position
             self.sample_transient_pos = dr.select(
-                (current_bin < self.size_xyt.z),
+                (current_bin < self.size_xyt.z)
+                & (
+                    (self.sample_transient_pos < current_bin)
+                    | (self.sample_transient_pos == self.size_xyt.z)
+                ),
                 current_bin,
                 self.sample_transient_pos,
             )

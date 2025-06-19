@@ -181,7 +181,7 @@ class TransientHDRFilm(mi.Film):
         count += missing
         mu = sum1 / total_spp
         print(
-            "Min Max estmiands variance: ",
+            "Min Max mu: ",
             dr.min(mu),
             " ",
             dr.max(mu),
@@ -189,8 +189,11 @@ class TransientHDRFilm(mi.Film):
 
         # Varianza muestral con Bessel
         var = (sum2 - (total_spp * mu**2)) / (total_spp - 1)
+        var = dr.select(var < 0.0, 0.0, var)
 
-        m3 = (sum3 - 3 * mu * sum2 + 2 * total_spp * mu**3) / total_spp
+        m3 = (
+            (sum3 / total_spp) - (3 * mu * var) - (mu**3)
+        )  # (sum3 - 3 * mu * sum2 + 2 * total_spp * mu**3) / total_spp
 
         print(
             "Min Max m3: ",

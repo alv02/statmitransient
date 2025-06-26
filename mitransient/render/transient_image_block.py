@@ -93,13 +93,13 @@ class TransientImageBlock(mi.Object):
         index = dr.fma(p.y, self.size_xyt.x, p.x)
         index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
         to_update &= dr.all((0 <= p) & (p < self.size_xyt))
-        pos_reshaped = dr.reshape(
-            dtype=mi.TensorXf,
-            value=p,
-            shape=(3, self.size_xyt.y, self.size_xyt.x, self.spp),
-            order="C",
-        )
-        dr.print("Positions of pyxel: {}", pos_reshaped[2, 324, 41, :], limit=100)
+        # pos_reshaped = dr.reshape(
+        #     dtype=mi.TensorXf,
+        #     value=p,
+        #     shape=(3, self.size_xyt.y, self.size_xyt.x, self.spp),
+        #     order="C",
+        # )
+        # dr.print("Positions of pyxel: {}", pos_reshaped[2, 324, 41, :], limit=100)
         for k in range(self.channel_count):
             sample_bc = self.box_cox(self.sample_value[k])
             dr.scatter_reduce(

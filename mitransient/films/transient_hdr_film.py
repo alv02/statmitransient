@@ -133,7 +133,7 @@ class TransientHDRFilm(mi.Film):
         steady_image = self.steady.develop(raw=raw)
         transient_image = self.develop_transient_(raw=raw)
         stats = self.develop_stats(total_spp)
-        np.save("./transient_data.npy", transient_image)
+        np.save(f"./transient_data_{total_spp}.npy", transient_image)
 
         return steady_image, transient_image
 
@@ -231,7 +231,7 @@ class TransientHDRFilm(mi.Film):
         combined_statistics = np.concatenate(
             [estimands_np, estimands_variance_np, total_spp_np], axis=4
         )
-        np.save("./transient_stats.npy", combined_statistics)
+        np.save(f"./transient_stats_{total_spp}.npy", combined_statistics)
         return combined_statistics
 
     def develop_transient_(self, raw: bool = False):

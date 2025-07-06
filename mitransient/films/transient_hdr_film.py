@@ -301,10 +301,12 @@ class TransientHDRFilm(mi.Film):
 
     def update_stats(
         self,
+        value: mi.Spectrum,
+        transient_pos: mi.UInt32,
         pos: mi.Vector2f,
         active,
     ):
-        self.transient_storage.update_stats(active)
+        self.transient_storage.update_stats()
 
     def to_string(self):
         string = "TransientHDRFilm[\n"

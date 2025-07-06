@@ -64,11 +64,6 @@ class TransientImageBlock(mi.Object):
 
         self.tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         # Compensation is not implented: https://github.com/mitsuba-renderer/mitsuba3/blob/b2ec619c7ba612edb1cf820463b32e5a334d8471/src/render/imageblock.cpp#L80
-        self.sample_value = [dr.zeros(mi.Float) for _ in range(self.channel_count)]
-        # TODO: Harcodeado esto usar el size de bins quiza + num o algo
-        self.sample_transient_pos = dr.full(mi.UInt32, self.size_xyt.z)
-
-        self.sample_pos = mi.Point2u(0, 0)
 
         self.count_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum1_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
@@ -87,21 +82,21 @@ class TransientImageBlock(mi.Object):
     def box_cox(self, samples, lam=0.5):
         return dr.log(samples) if lam == 0 else ((dr.power(samples, lam) - 1) / lam)
 
-    def update_stats(self, to_update: mi.Bool):
-        p = mi.Point3u(self.sample_pos.x, self.sample_pos.y, self.sample_transient_pos)
+    def update_stats(
+        self,
+        value: mi.Spectrum,
+        transient_pos: mi.UInt32,
+        pos: mi.Vector2f,
+        to_update: mi.Bool,
+    ):
+        coords = mi.Vector3f(pos.x, pos.y, transient_pos)
+        p = mi.Point3u(dr.floor(coords) - self.offset_xyt)
 
         index = dr.fma(p.y, self.size_xyt.x, p.x)
         index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
         to_update &= dr.all((0 <= p) & (p < self.size_xyt))
-        # pos_reshaped = dr.reshape(
-        #     dtype=mi.TensorXf,
-        #     value=p,
-        #     shape=(3, self.size_xyt.y, self.size_xyt.x, self.spp),
-        #     order="C",
-        # )
-        # dr.print("Positions of pyxel: {}", pos_reshaped[2, 324, 41, :], limit=100)
-        for k in range(self.channel_count):
-            sample_bc = self.box_cox(self.sample_value[k])
+        for k in range(3):
+            sample_bc = self.box_cox(value[k])
             dr.scatter_reduce(
                 dr.ReduceOp.Add, self.sum1_tensor.array, sample_bc, index + k, to_update
             )
@@ -179,41 +174,6 @@ class TransientImageBlock(mi.Object):
 
             for k in range(self.channel_count):
                 self.accum(values[k], index + k, active)
-
-            # Parte de estadísticas
-            # TODO: Esto creo que tendria que ir con un select
-            self.sample_pos = mi.Point2u(p.x, p.y)
-
-            # Check if we need to update stats - this should be False for single temporal bin
-            current_bin = p.z
-            to_update = (
-                active
-                & (current_bin < self.size_xyt.z)
-                & (self.sample_transient_pos < current_bin)
-            )
-
-            # print("Current bin:", current_bin)
-            # print("Sample transient pos:", self.sample_transient_pos)
-            # print("Size z:", self.size_xyt.z)
-            # print("True count:", dr.count(to_update))
-            # print("False count:", dr.count(~to_update))
-
-            self.update_stats(to_update)
-            for k in range(self.channel_count):
-                # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
-                self.sample_value[k] = dr.select(to_update, 0, self.sample_value[k])
-                # En caso de que el camino siga activo sumar la nueva contribucion
-                self.sample_value[k] += dr.select(active, values[k] * self.spp, 0)
-            # Update transient position
-            self.sample_transient_pos = dr.select(
-                (current_bin < self.size_xyt.z)
-                & (
-                    (self.sample_transient_pos < current_bin)
-                    | (self.sample_transient_pos == self.size_xyt.z)
-                ),
-                current_bin,
-                self.sample_transient_pos,
-            )
 
         else:
             mi.Log(

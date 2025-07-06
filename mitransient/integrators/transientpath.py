@@ -79,7 +79,7 @@ class TransientPath(TransientADIntegrator):
         add_transient: Callable[
             [mi.Spectrum, mi.Float, mi.UnpolarizedSpectrum, mi.Mask], None
         ],
-        update_stats: Callable[[mi.Mask], None],
+        update_stats: Callable[[mi.Spectrum, mi.UInt32, mi.Mask], None],
         **kwargs,  # Absorbs unused arguments
     ) -> Tuple[mi.Spectrum, mi.Bool, List[mi.Float], mi.Spectrum]:
         """
@@ -111,6 +111,13 @@ class TransientPath(TransientADIntegrator):
         prev_bsdf_pdf = mi.Float(1.0)
         prev_bsdf_delta = mi.Bool(True)
 
+        # Variables for statisticas
+        sample_value = mi.Spectrum(0 if primal else state_in)  # Radiance accumulator
+        # TODO: Hardcodeado
+        transient_bin = dr.full(mi.UInt32, 3)
+        current_bin = dr.full(mi.UInt32, 0)
+        last_update = mi.Bool(False)
+
         if self.camera_unwarp:
             si = scene.ray_intersect(
                 mi.Ray3f(ray), ray_flags=mi.RayFlags.All, coherent=mi.Mask(True)
@@ -122,7 +129,7 @@ class TransientPath(TransientADIntegrator):
             active,
             max_iterations=self.max_depth,
             label="Transient Path (%s)" % mode.name,
-            mode="evaluated",
+            # mode="evaluated",
         ):
             active_next = mi.Bool(active)
 
@@ -166,6 +173,23 @@ class TransientPath(TransientADIntegrator):
             # Add transient contribution because of emitter found
             add_transient(Le, distance, ray.wavelengths, active)
 
+            # TODO: Hardcodeado
+            current_bin = mi.UInt32(dr.floor((distance - 1000) / 400))
+            to_update = active & (current_bin < 3) & (transient_bin < current_bin)
+            update_stats(sample_value, transient_bin, to_update)
+            for k in range(3):
+                # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
+                sample_value[k] = dr.select(to_update, 0, sample_value[k])
+                # En caso de que el camino siga activo sumar la nueva contribucion
+                sample_value[k] += dr.select(active, Le[k], 0)
+            # Update transient position
+            transient_bin = dr.select(
+                (current_bin < 3)
+                & ((transient_bin < current_bin) | (transient_bin == 3)),
+                current_bin,
+                transient_bin,
+            )
+
             # ---------------------- Emitter sampling ----------------------
 
             # Should we continue tracing to reach one more vertex?
@@ -199,6 +223,24 @@ class TransientPath(TransientADIntegrator):
 
             # Add contribution direct emitter sampling
             add_transient(Lr_dir, distance + ds.dist * η, ray.wavelengths, active)
+
+            # TODO: Hardcodeado
+            current_bin = mi.UInt32(dr.floor(((distance + ds.dist * η) - 1000) / 400))
+            to_update = active & (current_bin < 3) & (transient_bin < current_bin)
+            update_stats(sample_value, transient_bin, to_update)
+            for k in range(3):
+                # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
+                sample_value[k] = dr.select(to_update, 0, sample_value[k])
+                # En caso de que el camino siga activo sumar la nueva contribucion
+                sample_value[k] += dr.select(active, Lr_dir[k], 0)
+            # Update transient position
+            transient_bin = dr.select(
+                (current_bin < 3)
+                & ((transient_bin < current_bin) | (transient_bin == 3)),
+                current_bin,
+                transient_bin,
+            )
+
             # ------------------ Detached BSDF sampling -------------------
 
             bsdf_sample, bsdf_weight = bsdf.sample(
@@ -295,8 +337,12 @@ class TransientPath(TransientADIntegrator):
             depth[si.is_valid()] += 1
             active = active_next
 
+            to_update = ~active & ~last_update
+            last_update = ~active
+            update_stats(sample_value, transient_bin, to_update)
+
         # Queremos actualizar todos los samples
-        update_stats(mi.Bool(True))
+        # update_stats(mi.Bool(True))
 
         return (
             L if primal else δL,  # Radiance/differential radiance

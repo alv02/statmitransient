@@ -178,8 +178,8 @@ class TransientADIntegrator(ADIntegrator):
 
             # film.update_sample_stats(None, None, total_spp)
 
-            steady_image, transient_image = film.develop(total_spp=total_spp)
-            return steady_image, transient_image
+            steady_image, transient_image, stats = film.develop(total_spp=total_spp)
+            return steady_image, transient_image, stats
 
     def render_forward(
         self: mi.SamplingIntegrator,
@@ -228,7 +228,9 @@ class TransientADIntegrator(ADIntegrator):
         film: TransientHDRFilm,
         pos: mi.Vector2f,
     ):
-        return lambda active: film.update_stats(
+        return lambda value, transient_pos, active: film.update_stats(
+            value,
+            transient_pos,
             pos,
             active,
         )

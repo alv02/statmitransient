@@ -105,6 +105,7 @@ class TransientADIntegrator(ADIntegrator):
         if isinstance(sensor, int):
             sensor = scene.sensors()[sensor]
         film = sensor.film()
+        self.film = film
 
         self.check_transient_(scene, sensor)
 
@@ -145,6 +146,7 @@ class TransientADIntegrator(ADIntegrator):
                     update_stats=self.update_stats_f(
                         film=film,
                         pos=pos,
+                        ray_weight=weight,
                     ),
                 )
 
@@ -227,11 +229,13 @@ class TransientADIntegrator(ADIntegrator):
         self,
         film: TransientHDRFilm,
         pos: mi.Vector2f,
+        ray_weight: mi.Float,
     ):
         return lambda value, transient_pos, active: film.update_stats(
             value,
             transient_pos,
             pos,
+            ray_weight,
             active,
         )
 

@@ -114,8 +114,8 @@ class TransientPath(TransientADIntegrator):
         # Variables for statisticas
         sample_value = mi.Spectrum(0 if primal else state_in)  # Radiance accumulator
         # TODO: Hardcodeado
-        transient_bin = dr.full(mi.UInt32, 3)
-        current_bin = dr.full(mi.UInt32, 0)
+        transient_pos = dr.full(mi.UInt32, self.film.temporal_bins)
+        current_transient_pos = dr.full(mi.UInt32, 0)
         last_update = mi.Bool(False)
 
         if self.camera_unwarp:
@@ -174,20 +174,29 @@ class TransientPath(TransientADIntegrator):
             add_transient(Le, distance, ray.wavelengths, active)
 
             # TODO: Hardcodeado
-            current_bin = mi.UInt32(dr.floor((distance - 1000) / 400))
-            to_update = active & (current_bin < 3) & (transient_bin < current_bin)
-            update_stats(sample_value, transient_bin, to_update)
+            current_transient_pos = mi.UInt32(
+                dr.floor((distance - self.film.start_opl) / self.film.bin_width_opl)
+            )
+            to_update = (
+                active
+                & (current_transient_pos < self.film.temporal_bins)
+                & (transient_pos < current_transient_pos)
+            )
+            update_stats(sample_value, transient_pos, to_update)
             for k in range(3):
                 # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
                 sample_value[k] = dr.select(to_update, 0, sample_value[k])
                 # En caso de que el camino siga activo sumar la nueva contribucion
                 sample_value[k] += dr.select(active, Le[k], 0)
             # Update transient position
-            transient_bin = dr.select(
-                (current_bin < 3)
-                & ((transient_bin < current_bin) | (transient_bin == 3)),
-                current_bin,
-                transient_bin,
+            transient_pos = dr.select(
+                (current_transient_pos < self.film.temporal_bins)
+                & (
+                    (transient_pos < current_transient_pos)
+                    | (transient_pos == self.film.temporal_bins)
+                ),
+                current_transient_pos,
+                transient_pos,
             )
 
             # ---------------------- Emitter sampling ----------------------
@@ -225,20 +234,32 @@ class TransientPath(TransientADIntegrator):
             add_transient(Lr_dir, distance + ds.dist * η, ray.wavelengths, active)
 
             # TODO: Hardcodeado
-            current_bin = mi.UInt32(dr.floor(((distance + ds.dist * η) - 1000) / 400))
-            to_update = active & (current_bin < 3) & (transient_bin < current_bin)
-            update_stats(sample_value, transient_bin, to_update)
+            current_transient_pos = mi.UInt32(
+                dr.floor(
+                    ((distance + ds.dist * η) - self.film.start_opl)
+                    / self.film.bin_width_opl
+                )
+            )
+            to_update = (
+                active
+                & (current_transient_pos < self.film.temporal_bins)
+                & (transient_pos < current_transient_pos)
+            )
+            update_stats(sample_value, transient_pos, to_update)
             for k in range(3):
                 # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
                 sample_value[k] = dr.select(to_update, 0, sample_value[k])
                 # En caso de que el camino siga activo sumar la nueva contribucion
                 sample_value[k] += dr.select(active, Lr_dir[k], 0)
             # Update transient position
-            transient_bin = dr.select(
-                (current_bin < 3)
-                & ((transient_bin < current_bin) | (transient_bin == 3)),
-                current_bin,
-                transient_bin,
+            transient_pos = dr.select(
+                (current_transient_pos < self.film.temporal_bins)
+                & (
+                    (transient_pos < current_transient_pos)
+                    | (transient_pos == self.film.temporal_bins)
+                ),
+                current_transient_pos,
+                transient_pos,
             )
 
             # ------------------ Detached BSDF sampling -------------------
@@ -339,7 +360,7 @@ class TransientPath(TransientADIntegrator):
 
             to_update = ~active & ~last_update
             last_update = ~active
-            update_stats(sample_value, transient_bin, to_update)
+            update_stats(sample_value, transient_pos, to_update)
 
         # Queremos actualizar todos los samples
         # update_stats(mi.Bool(True))

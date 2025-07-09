@@ -135,7 +135,7 @@ class TransientHDRFilm(mi.Film):
         stats = self.develop_stats(total_spp)
         np.save(f"./transient_data_{total_spp}.npy", transient_image)
 
-        return steady_image, transient_image
+        return steady_image, transient_image, stats
 
     def gather_tensor(self, data):
         pixel_count = dr.prod(data.shape[0:-1])
@@ -231,7 +231,6 @@ class TransientHDRFilm(mi.Film):
         combined_statistics = np.concatenate(
             [estimands_np, estimands_variance_np, total_spp_np], axis=4
         )
-        np.save(f"./transient_stats_{total_spp}.npy", combined_statistics)
         return combined_statistics
 
     def develop_transient_(self, raw: bool = False):
@@ -304,9 +303,10 @@ class TransientHDRFilm(mi.Film):
         value: mi.Spectrum,
         transient_pos: mi.UInt32,
         pos: mi.Vector2f,
+        ray_weight,
         active,
     ):
-        self.transient_storage.update_stats()
+        self.transient_storage.update_stats(value, transient_pos, pos, active)
 
     def to_string(self):
         string = "TransientHDRFilm[\n"

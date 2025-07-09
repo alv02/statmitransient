@@ -159,16 +159,8 @@ class TransientHDRFilm(mi.Film):
         sum2 = self.gather_tensor(self.transient_storage.sum2_tensor)
         sum3 = self.gather_tensor(self.transient_storage.sum3_tensor)
 
-        print("Count pixel: ", count[324, 41])
-        print(
-            "Min Max counts: ",
-            dr.min(count),
-            " ",
-            dr.max(count),
-        )
-
         missing = total_spp - count
-        missing = np.maximum(0, missing)
+        missing = dr.maximum(0, missing)
         # Box-Cox of zero (0 transformed)
 
         box_cox_zero = self.transient_storage.box_cox(0.0)
@@ -179,12 +171,6 @@ class TransientHDRFilm(mi.Film):
         sum3 += missing * box_cox_zero**3
         count += missing
         mu = sum1 / total_spp
-        print(
-            "Min Max mu: ",
-            dr.min(mu),
-            " ",
-            dr.max(mu),
-        )
 
         # Varianza muestral con Bessel
         var = (sum2 - (total_spp * mu**2)) / (total_spp - 1)
@@ -194,29 +180,10 @@ class TransientHDRFilm(mi.Film):
             (sum3 / total_spp) - (3 * mu * var) - (mu**3)
         )  # (sum3 - 3 * mu * sum2 + 2 * total_spp * mu**3) / total_spp
 
-        print(
-            "Min Max m3: ",
-            dr.min(m3),
-            " ",
-            dr.max(m3),
-        )
-
         # When the variance is 0 there is no need for skewness correction
-        estimands = np.where(var == 0, mu, mu + m3 / (6 * var * total_spp))
 
-        print("variance ", var[47, 361])
-        print("m3", m3[47, 361])
-        print("estimands", estimands[47, 361])
-        print("mu", mu[47, 361])
-        print(total_spp)
+        estimands = dr.select(var == 0, mu, mu + m3 / (6 * var * total_spp))
         estimands_variance = var / total_spp
-        print("Min Max estimands: ", estimands.min(), " ", estimands.max())
-        print(
-            "Min Max estmiands variance: ",
-            dr.min(estimands_variance),
-            " ",
-            dr.max(estimands_variance),
-        )
 
         estimands_expanded = estimands[..., dr.newaxis]
         estimands_variance_expanded = estimands_variance[..., dr.newaxis]
@@ -225,7 +192,7 @@ class TransientHDRFilm(mi.Film):
 
         estimands_np = dr.detach(estimands_expanded)
         estimands_variance_np = dr.detach(estimands_variance_expanded)
-        total_spp_np = np.full_like(estimands_np, total_spp)
+        total_spp_np = np.full_like(estimands_np, total_spp, dtype=np.float32)
 
         combined_statistics = np.concatenate(
             [estimands_np, estimands_variance_np, total_spp_np], axis=4

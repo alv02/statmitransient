@@ -22,6 +22,7 @@ class TransientImageBlock(mi.Object):
         channel_count: int,
         rfilter: mi.ReconstructionFilter,
         spp,
+        lambda_bc: float = 0.5,
         border: bool = False,
         # normalize: bool = False,
         # coalesce: bool = False,
@@ -42,6 +43,7 @@ class TransientImageBlock(mi.Object):
         self.warn_negative = warn_negative
         self.warn_invalid = warn_invalid
         self.spp = spp
+        self.lambda_bc = lambda_bc
 
         if rfilter and rfilter.is_box_filter():
             self.rfilter = None
@@ -79,8 +81,12 @@ class TransientImageBlock(mi.Object):
     def accum(self, value: mi.Float, index: mi.UInt32, active: mi.Bool):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
 
-    def box_cox(self, samples, lam=0.5):
-        return dr.log(samples) if lam == 0 else ((dr.power(samples, lam) - 1) / lam)
+    def box_cox(self, samples):
+        return (
+            dr.log(samples)
+            if self.lambda_bc == 0
+            else ((dr.power(samples, self.lambda_bc) - 1) / self.lambda_bc)
+        )
 
     def update_stats(
         self,

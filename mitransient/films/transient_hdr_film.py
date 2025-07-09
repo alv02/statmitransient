@@ -133,7 +133,6 @@ class TransientHDRFilm(mi.Film):
         steady_image = self.steady.develop(raw=raw)
         transient_image = self.develop_transient_(raw=raw)
         stats = self.develop_stats(total_spp)
-        np.save(f"./transient_data_{total_spp}.npy", transient_image)
 
         return steady_image, transient_image, stats
 

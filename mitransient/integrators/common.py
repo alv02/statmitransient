@@ -157,16 +157,16 @@ class TransientADIntegrator(ADIntegrator):
                 block.set_coalesce(block.coalesce() and spp_i >= 4)
 
                 # Accumulate into the image block
-                ADIntegrator._splat_to_block(
-                    block,
-                    film,
-                    pos,
-                    value=L * weight,
-                    weight=1.0,
-                    alpha=dr.select(valid, mi.Float(1), mi.Float(0)),
-                    aovs=aovs,
-                    wavelengths=ray.wavelengths,
-                )
+                # ADIntegrator._splat_to_block(
+                #     block,
+                #     film,
+                #     pos,
+                #     value=L * weight,
+                #     weight=1.0,
+                #     alpha=dr.select(valid, mi.Float(1), mi.Float(0)),
+                #     aovs=aovs,
+                #     wavelengths=ray.wavelengths,
+                # )
 
                 # Explicitly delete any remaining unused variables
                 del sampler_i, ray, weight, pos, L, valid
@@ -177,8 +177,6 @@ class TransientADIntegrator(ADIntegrator):
                 # Report progress
                 if progress_callback:
                     progress_callback((i + 1) / len(samplers_spps))
-
-            # film.update_sample_stats(None, None, total_spp)
 
             steady_image, transient_image, stats = film.develop(total_spp=total_spp)
             return steady_image, transient_image, stats

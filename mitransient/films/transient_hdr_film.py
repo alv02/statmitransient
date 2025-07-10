@@ -166,40 +166,26 @@ class TransientHDRFilm(mi.Film):
         # Box-Cox of zero (0 transformed)
 
         box_cox_zero = self.transient_storage.box_cox(0)
-        print(box_cox_zero)
 
         # Fill accumulators with zeros
         sum1 += missing * box_cox_zero
         sum2 += missing * box_cox_zero**2
         sum3 += missing * box_cox_zero**3
         count += missing
-        mu = sum1 / total_spp
-        print(
-            "Min Max mu: ",
-            dr.min(mu),
-            " ",
-            dr.max(mu),
-        )
+        mu = sum1 / count
 
         # Varianza muestral con Bessel
-        var = (sum2 - (total_spp * mu**2)) / (total_spp - 1)
+        var = (sum2 - (count * mu**2)) / (count - 1)
         var = dr.select(var < 0.0, 0.0, var)
 
-        m3 = (sum3 / total_spp) - (3 * mu * var) - (mu**3)
+        m3 = (sum3 / count) - (3 * mu * var) - (mu**3)
 
         # When the variance is 0 there is no need for skewness correction
 
-        estimands = dr.select(var == 0, mu, mu + m3 / (6 * var * total_spp))
-        estimands_variance = var / total_spp
-
+        estimands = dr.select(var == 0, mu, mu + m3 / (6 * var * count))
+        estimands_variance = var / count
         estimands_expanded = estimands[..., dr.newaxis]
         estimands_variance_expanded = estimands_variance[..., dr.newaxis]
-        print(
-            "Min Max estmiands: ",
-            dr.min(estimands),
-            " ",
-            dr.max(estimands),
-        )
         # Crear tensor total_spp con la misma forma que estimands
 
         estimands_np = dr.detach(estimands_expanded)

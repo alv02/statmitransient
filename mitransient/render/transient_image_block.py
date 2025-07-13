@@ -68,6 +68,7 @@ class TransientImageBlock(mi.Object):
         # Compensation is not implented: https://github.com/mitsuba-renderer/mitsuba3/blob/b2ec619c7ba612edb1cf820463b32e5a334d8471/src/render/imageblock.cpp#L80
 
         self.count_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
+        self.count2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum1_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum3_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
@@ -80,8 +81,10 @@ class TransientImageBlock(mi.Object):
 
     def accum(self, value: mi.Float, index: mi.UInt32, active: mi.Bool):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
+        dr.scatter_reduce(dr.ReduceOp.Add, self.count2_tensor.array, 1.0, index, active)
 
     def box_cox(self, samples):
+        return samples
         return (
             dr.log(samples)
             if self.lambda_bc == 0

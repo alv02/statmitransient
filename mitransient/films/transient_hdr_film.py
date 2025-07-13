@@ -157,9 +157,30 @@ class TransientHDRFilm(mi.Film):
 
     def develop_stats(self, total_spp):
         count = self.gather_tensor(self.transient_storage.count_tensor)
+        count2 = self.gather_tensor(self.transient_storage.count2_tensor)
+        media = self.gather_tensor(self.transient_storage.tensor)
         sum1 = self.gather_tensor(self.transient_storage.sum1_tensor)
         sum2 = self.gather_tensor(self.transient_storage.sum2_tensor)
         sum3 = self.gather_tensor(self.transient_storage.sum3_tensor)
+
+        if np.array_equal(count, count2):
+            print("Los tensores son iguales.")
+        else:
+            print("Los tensores son distintos.")
+
+        print("Count pyxel: ", count[300, 653, 0, :])
+        print("Count2 pyxel", count2[300, 653, 0, :])
+        print("Media pyxel: ", media[300, 653, 0, :])
+        print("Sum1 pyxel: ", sum1[300, 653, 0, :])
+
+        print(
+            "Min Mean Max count: ",
+            dr.min(count),
+            " ",
+            dr.mean(count),
+            " ",
+            dr.max(count),
+        )
 
         missing = total_spp - count
         missing = dr.maximum(0, missing)
@@ -168,24 +189,47 @@ class TransientHDRFilm(mi.Film):
         box_cox_zero = self.transient_storage.box_cox(0)
 
         # Fill accumulators with zeros
-        sum1 += missing * box_cox_zero
+        # sum1 += missing * box_cox_zero
         sum2 += missing * box_cox_zero**2
         sum3 += missing * box_cox_zero**3
         count += missing
-        mu = sum1 / count
+        mu = sum1
 
         # Varianza muestral con Bessel
         var = (sum2 - (count * mu**2)) / (count - 1)
         var = dr.select(var < 0.0, 0.0, var)
 
         m3 = (sum3 / count) - (3 * mu * var) - (mu**3)
-
         # When the variance is 0 there is no need for skewness correction
 
-        estimands = dr.select(var == 0, mu, mu + m3 / (6 * var * count))
+        estimands = mu  # dr.select(var == 0, mu, mu + m3 / (6 * var * count))
         estimands_variance = var / count
         estimands_expanded = estimands[..., dr.newaxis]
         estimands_variance_expanded = estimands_variance[..., dr.newaxis]
+        print(
+            "Min Mean Max estimands: ",
+            dr.min(estimands),
+            " ",
+            dr.mean(estimands),
+            " ",
+            dr.max(estimands),
+        )
+        print(
+            "Min Mean Max estimands_variance: ",
+            dr.min(estimands_variance),
+            " ",
+            dr.mean(estimands_variance),
+            " ",
+            dr.max(estimands_variance),
+        )
+        print(
+            "Min Mean Max m3: ",
+            dr.min(m3),
+            " ",
+            dr.mean(m3),
+            " ",
+            dr.max(m3),
+        )
         # Crear tensor total_spp con la misma forma que estimands
 
         estimands_np = dr.detach(estimands_expanded)
@@ -270,8 +314,9 @@ class TransientHDRFilm(mi.Film):
         ray_weight,
         active,
     ):
+        mask = (transient_pos >= 0) & (transient_pos < self.temporal_bins)
         self.transient_storage.update_stats(
-            value * ray_weight, transient_pos, pos, active
+            value * ray_weight, transient_pos, pos, active & mask
         )
 
     def to_string(self):

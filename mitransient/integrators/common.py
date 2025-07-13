@@ -147,7 +147,9 @@ class TransientADIntegrator(ADIntegrator):
                         film=film,
                         pos=pos,
                         ray_weight=weight,
+                        sample_scale=1.0 / total_spp,
                     ),
+                    pos=pos,
                 )
 
                 # Prepare an ImageBlock as specified by the film
@@ -228,9 +230,10 @@ class TransientADIntegrator(ADIntegrator):
         film: TransientHDRFilm,
         pos: mi.Vector2f,
         ray_weight: mi.Float,
+        sample_scale: mi.Float,
     ):
         return lambda value, transient_pos, active: film.update_stats(
-            value,
+            value * sample_scale,
             transient_pos,
             pos,
             ray_weight,

@@ -80,6 +80,7 @@ class TransientPath(TransientADIntegrator):
             [mi.Spectrum, mi.Float, mi.UnpolarizedSpectrum, mi.Mask], None
         ],
         update_stats: Callable[[mi.Spectrum, mi.UInt32, mi.Mask], None],
+        pos: mi.Vector2f,
         **kwargs,  # Absorbs unused arguments
     ) -> Tuple[mi.Spectrum, mi.Bool, List[mi.Float], mi.Spectrum]:
         """
@@ -116,6 +117,7 @@ class TransientPath(TransientADIntegrator):
         # TODO: Hardcodeado
         transient_pos = dr.full(mi.UInt32, self.film.temporal_bins)
         current_transient_pos = dr.full(mi.UInt32, 0)
+        pos_distance = dr.full(mi.Float, 0.0)
         last_update = mi.Bool(False)
 
         if self.camera_unwarp:
@@ -173,28 +175,25 @@ class TransientPath(TransientADIntegrator):
             # Add transient contribution because of emitter found
             add_transient(Le, distance, ray.wavelengths, active)
 
-            # TODO: Hardcodeado
-            current_transient_pos = mi.UInt32(
-                dr.floor((distance - self.film.start_opl) / self.film.bin_width_opl)
+            # TODO: Resvisar esto
+            pos_distance = (distance - self.film.start_opl) / self.film.bin_width_opl
+            mask = mi.Bool(
+                (pos_distance >= 0) & (pos_distance < self.film.temporal_bins)
             )
-            to_update = (
-                active
-                & (current_transient_pos < self.film.temporal_bins)
-                & (transient_pos < current_transient_pos)
+
+            current_transient_pos = dr.select(
+                mask, mi.UInt32(dr.floor(pos_distance)), self.film.temporal_bins
             )
+            to_update = active & mask
             update_stats(sample_value, transient_pos, to_update)
             for k in range(3):
                 # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
                 sample_value[k] = dr.select(to_update, 0, sample_value[k])
                 # En caso de que el camino siga activo sumar la nueva contribucion
-                sample_value[k] += dr.select(active, Le[k], 0)
+                sample_value[k] += dr.select(active & mask, Le[k], 0)
             # Update transient position
             transient_pos = dr.select(
-                (current_transient_pos < self.film.temporal_bins)
-                & (
-                    (transient_pos < current_transient_pos)
-                    | (transient_pos == self.film.temporal_bins)
-                ),
+                mask,
                 current_transient_pos,
                 transient_pos,
             )
@@ -233,31 +232,27 @@ class TransientPath(TransientADIntegrator):
             # Add contribution direct emitter sampling
             add_transient(Lr_dir, distance + ds.dist * η, ray.wavelengths, active)
 
-            # TODO: Hardcodeado
-            current_transient_pos = mi.UInt32(
-                dr.floor(
-                    ((distance + ds.dist * η) - self.film.start_opl)
-                    / self.film.bin_width_opl
-                )
+            # TODO: Resvisar esto
+            pos_distance = (
+                (distance + ds.dist * η) - self.film.start_opl
+            ) / self.film.bin_width_opl
+            mask = mi.Bool(
+                (pos_distance >= 0) & (pos_distance < self.film.temporal_bins)
             )
-            to_update = (
-                active
-                & (current_transient_pos < self.film.temporal_bins)
-                & (transient_pos < current_transient_pos)
+
+            current_transient_pos = dr.select(
+                mask, mi.UInt32(dr.floor(pos_distance)), self.film.temporal_bins
             )
+            to_update = active & mask
             update_stats(sample_value, transient_pos, to_update)
             for k in range(3):
                 # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
                 sample_value[k] = dr.select(to_update, 0, sample_value[k])
                 # En caso de que el camino siga activo sumar la nueva contribucion
-                sample_value[k] += dr.select(active, Lr_dir[k], 0)
+                sample_value[k] += dr.select(active & mask, Lr_dir[k], 0)
             # Update transient position
             transient_pos = dr.select(
-                (current_transient_pos < self.film.temporal_bins)
-                & (
-                    (transient_pos < current_transient_pos)
-                    | (transient_pos == self.film.temporal_bins)
-                ),
+                mask,
                 current_transient_pos,
                 transient_pos,
             )

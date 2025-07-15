@@ -182,19 +182,19 @@ class TransientPath(TransientADIntegrator):
             current_transient_pos = dr.select(
                 mask, mi.UInt32(dr.floor(pos_distance)), self.film.temporal_bins
             )
-            to_update = active & mask & (transient_pos != current_transient_pos)
-            update_stats(sample_value, transient_pos, to_update)
-            for k in range(3):
-                # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
-                sample_value[k] = dr.select(to_update, 0.0, sample_value[k])
-                # En caso de que el camino siga activo sumar la nueva contribucion y el nuevo sample sea valido
-                sample_value[k] += dr.select(mask & active, Le[k], 0.0)
+            to_update = active  # & mask & (transient_pos != current_transient_pos)
+            update_stats(Le, current_transient_pos, to_update)
+            # for k in range(3):
+            #     # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
+            #     sample_value[k] = dr.select(to_update, 0.0, sample_value[k])
+            #     # En caso de que el camino siga activo sumar la nueva contribucion y el nuevo sample sea valido
+            #     sample_value[k] += dr.select(mask & active, Le[k], 0.0)
             # Update transient position
-            transient_pos = dr.select(
-                to_update,
-                current_transient_pos,
-                transient_pos,
-            )
+            # transient_pos = dr.select(
+            #     to_update,
+            #     current_transient_pos,
+            #     transient_pos,
+            # )
 
             # ---------------------- Emitter sampling ----------------------
 
@@ -239,19 +239,19 @@ class TransientPath(TransientADIntegrator):
             current_transient_pos = dr.select(
                 mask, mi.UInt32(dr.floor(pos_distance)), self.film.temporal_bins
             )
-            to_update = active & mask & (transient_pos != current_transient_pos)
-            update_stats(sample_value, transient_pos, to_update)
-            for k in range(3):
-                # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
-                sample_value[k] = dr.select(to_update, 0.0, sample_value[k])
-                # En caso de que el camino siga activo sumar la nueva contribucion y el nuevo sample sea valido
-                sample_value[k] += dr.select(mask & active, Lr_dir[k], 0.0)
+            to_update = active  # & mask & (transient_pos != current_transient_pos)
+            update_stats(Lr_dir, current_transient_pos, to_update)
+            # for k in range(3):
+            #     # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
+            #     sample_value[k] = dr.select(to_update, 0.0, sample_value[k])
+            #     # En caso de que el camino siga activo sumar la nueva contribucion y el nuevo sample sea valido
+            #     sample_value[k] += dr.select(mask & active, Lr_dir[k], 00)
             # Update transient position
-            transient_pos = dr.select(
-                to_update,
-                current_transient_pos,
-                transient_pos,
-            )
+            # transient_pos = dr.select(
+            #     to_update,
+            #     current_transient_pos,
+            #     transient_pos,
+            # )
 
             # ------------------ Detached BSDF sampling -------------------
 
@@ -349,9 +349,9 @@ class TransientPath(TransientADIntegrator):
             depth[si.is_valid()] += 1
             active = active_next
 
-            to_update = ~active & ~last_update
-            last_update = ~active
-            update_stats(sample_value, transient_pos, to_update)
+            # to_update = ~active & ~last_update
+            # last_update = ~active
+            # update_stats(sample_value, transient_pos, to_update)
 
         # Queremos actualizar todos los samples
         # update_stats(mi.Bool(True))

@@ -179,32 +179,17 @@ class TransientHDRFilm(mi.Film):
             dr.max(count),
         )
 
-        missing = total_spp - count
-        missing = dr.maximum(0, missing)
-        # Box-Cox of zero (0 transformed)
+        samples_bounce = total_spp * 17
+        mu = sum1 / samples_bounce
 
-        zero_transformed = self.transient_storage.yeo_johnson(0.0)
-
-        # Fill accumulators with zeros
-        sum1 += missing * zero_transformed
-        sum2 += missing * zero_transformed**2
-        sum3 += missing * zero_transformed**3
-        count += missing
-        mu = sum1 / count
-
-        # Varianza muestral con Bessel
-        var = (sum2 - (count * mu**2)) / (count - 1)
+        var = (sum2 - (samples_bounce * mu**2)) / (samples_bounce - 1)
         var = dr.select(var < 0.0, 0.0, var)
 
-        m3 = (sum3 / count) - (3 * mu * var) - (mu**3)
+        m3 = (sum3 / samples_bounce) - (3 * mu * var) - (mu**3)
 
         # When the variance is 0 there is no need for skewness correction
-        estimands = dr.select(var == 0, mu, mu + m3 / (6 * var * count))
-        estimands_variance = var / count
-
-        # Guardar las estadisticas juntas
-        estimands_expanded = estimands[..., dr.newaxis]
-        estimands_variance_expanded = estimands_variance[..., dr.newaxis]
+        estimands = dr.select(var == 0, mu, mu + m3 / (6 * var * samples_bounce))
+        estimands_variance = var / samples_bounce  # Guardar las estadisticas juntas
         print(
             "Min Mean Max estimands: ",
             dr.min(estimands),
@@ -231,14 +216,7 @@ class TransientHDRFilm(mi.Film):
         )
         # Crear tensor total_spp con la misma forma que estimands
 
-        estimands_np = dr.detach(estimands_expanded)
-        estimands_variance_np = dr.detach(estimands_variance_expanded)
-        total_spp_np = np.full_like(estimands_np, total_spp, dtype=np.float32)
-
-        combined_statistics = np.concatenate(
-            [estimands_np, estimands_variance_np, total_spp_np], axis=4
-        )
-        return combined_statistics
+        return (estimands, estimands_variance)
 
     def develop_transient_(self, raw: bool = False):
         if not self.transient_storage:

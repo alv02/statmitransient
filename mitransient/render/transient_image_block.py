@@ -22,7 +22,7 @@ class TransientImageBlock(mi.Object):
         channel_count: int,
         rfilter: mi.ReconstructionFilter,
         spp,
-        lambda_bc: float = 0.5,
+        lambda_: float = 0.5,
         border: bool = False,
         # normalize: bool = False,
         # coalesce: bool = False,
@@ -43,7 +43,7 @@ class TransientImageBlock(mi.Object):
         self.warn_negative = warn_negative
         self.warn_invalid = warn_invalid
         self.spp = spp
-        self.lambda_bc = lambda_bc
+        self.lambda_ = lambda_
 
         if rfilter and rfilter.is_box_filter():
             self.rfilter = None
@@ -83,13 +83,22 @@ class TransientImageBlock(mi.Object):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
         dr.scatter_reduce(dr.ReduceOp.Add, self.count2_tensor.array, 1.0, index, active)
 
-    def box_cox(self, samples):
-        return samples
+    def box_cox(self, sample):
         return (
-            dr.log(samples)
-            if self.lambda_bc == 0
-            else ((dr.power(samples, self.lambda_bc) - 1) / self.lambda_bc)
+            dr.log(sample)
+            if self.lambda_ == 0
+            else ((dr.power(sample, self.lambda_) - 1) / self.lambda_)
         )
+
+    def yeo_johnson(self, sample):
+        if self.lambda_ != 0:
+            return (dr.power(sample + 1, self.lambda_) - 1) / self.lambda_
+        else:
+            return dr.log(sample + 1)
+            # elif (sample < 0) & (self.lambda_ != 2):
+            return -(dr.power(-sample + 1, 2 - self.lambda_) - 1) / (2 - self.lambda_)
+            # else:
+            return -dr.log(-sample + 1)
 
     def update_stats(
         self,
@@ -105,9 +114,13 @@ class TransientImageBlock(mi.Object):
         index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
         to_update &= dr.all((0 <= p) & (p < self.size_xyt))
         for k in range(3):
-            sample_bc = self.box_cox(value[k])
+            sample_transformed = self.yeo_johnson(value[k])
             dr.scatter_reduce(
-                dr.ReduceOp.Add, self.sum1_tensor.array, sample_bc, index + k, to_update
+                dr.ReduceOp.Add,
+                self.sum1_tensor.array,
+                sample_transformed,
+                index + k,
+                to_update,
             )
             dr.scatter_reduce(
                 dr.ReduceOp.Add, self.count_tensor.array, 1.0, index + k, to_update
@@ -115,14 +128,14 @@ class TransientImageBlock(mi.Object):
             dr.scatter_reduce(
                 dr.ReduceOp.Add,
                 self.sum2_tensor.array,
-                sample_bc**2,
+                sample_transformed**2,
                 index + k,
                 to_update,
             )
             dr.scatter_reduce(
                 dr.ReduceOp.Add,
                 self.sum3_tensor.array,
-                sample_bc**3,
+                sample_transformed**3,
                 index + k,
                 to_update,
             )

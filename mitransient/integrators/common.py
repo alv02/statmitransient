@@ -233,7 +233,7 @@ class TransientADIntegrator(ADIntegrator):
         sample_scale: mi.Float,
     ):
         return lambda value, transient_pos, active: film.update_stats(
-            value * sample_scale,
+            value,
             transient_pos,
             pos,
             ray_weight,

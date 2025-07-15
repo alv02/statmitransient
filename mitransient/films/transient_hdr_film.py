@@ -56,7 +56,7 @@ class TransientHDRFilm(mi.Film):
         self.temporal_bins = props.get("temporal_bins", mi.UInt32(2048))
         self.bin_width_opl = props.get("bin_width_opl", mi.Float(0.003))
         self.start_opl = props.get("start_opl", mi.Float(0))
-        self.lambda_bc = props.get("lambda", float(0.5))
+        self.lambda_ = props.get("lambda", float(0.5))
 
     def end_opl(self):
         return self.start_opl + self.bin_width_opl * self.temporal_bins
@@ -114,7 +114,7 @@ class TransientHDRFilm(mi.Film):
             channel_count=len(channels),
             rfilter=self.rfilter(),
             spp=spp,
-            lambda_bc=self.lambda_bc,
+            lambda_=self.lambda_,
         )
         self.channels = channels
 
@@ -162,17 +162,14 @@ class TransientHDRFilm(mi.Film):
         sum1 = self.gather_tensor(self.transient_storage.sum1_tensor)
         sum2 = self.gather_tensor(self.transient_storage.sum2_tensor)
         sum3 = self.gather_tensor(self.transient_storage.sum3_tensor)
-
-        if np.array_equal(count, count2):
-            print("Los tensores son iguales.")
-        else:
-            print("Los tensores son distintos.")
-
-        print("Count pyxel: ", count[300, 653, 0, :])
-        print("Count2 pyxel", count2[300, 653, 0, :])
-        print("Media pyxel: ", media[300, 653, 0, :])
-        print("Sum1 pyxel: ", sum1[300, 653, 0, :])
-
+        # if np.array_equal(count, count2):
+        # print("Los tensores son iguales.")
+        # else:
+        # print("Los tensores son distintos.")
+        print("Count pyxel: ", count[324, 690, 1, :])
+        print("Count2 pyxel", count2[324, 690, 1, :])
+        print("Media pyxel: ", media[324, 690, 1, :])
+        print("Sum1 pyxel: ", sum1[324, 690, 1, :])
         print(
             "Min Mean Max count: ",
             dr.min(count),
@@ -186,24 +183,26 @@ class TransientHDRFilm(mi.Film):
         missing = dr.maximum(0, missing)
         # Box-Cox of zero (0 transformed)
 
-        box_cox_zero = self.transient_storage.box_cox(0)
+        zero_transformed = self.transient_storage.yeo_johnson(0.0)
 
         # Fill accumulators with zeros
-        # sum1 += missing * box_cox_zero
-        sum2 += missing * box_cox_zero**2
-        sum3 += missing * box_cox_zero**3
+        sum1 += missing * zero_transformed
+        sum2 += missing * zero_transformed**2
+        sum3 += missing * zero_transformed**3
         count += missing
-        mu = sum1
+        mu = sum1 / count
 
         # Varianza muestral con Bessel
         var = (sum2 - (count * mu**2)) / (count - 1)
         var = dr.select(var < 0.0, 0.0, var)
 
         m3 = (sum3 / count) - (3 * mu * var) - (mu**3)
-        # When the variance is 0 there is no need for skewness correction
 
-        estimands = mu  # dr.select(var == 0, mu, mu + m3 / (6 * var * count))
+        # When the variance is 0 there is no need for skewness correction
+        estimands = dr.select(var == 0, mu, mu + m3 / (6 * var * count))
         estimands_variance = var / count
+
+        # Guardar las estadisticas juntas
         estimands_expanded = estimands[..., dr.newaxis]
         estimands_variance_expanded = estimands_variance[..., dr.newaxis]
         print(

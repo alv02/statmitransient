@@ -7,6 +7,8 @@ from mitsuba import Float, Int32, ScalarInt32, TensorXf
 
 from mitransient.render.transient_image_block import TransientImageBlock
 
+from ..utils import BOX_COX_TRANSFORMATION, YEO_JOHNSON_TRANSFORMATION
+
 
 class TransientHDRFilm(mi.Film):
     r"""
@@ -56,6 +58,9 @@ class TransientHDRFilm(mi.Film):
         self.temporal_bins = props.get("temporal_bins", mi.UInt32(2048))
         self.bin_width_opl = props.get("bin_width_opl", mi.Float(0.003))
         self.start_opl = props.get("start_opl", mi.Float(0))
+        self.transformation = props.get(
+            "transformation", int(YEO_JOHNSON_TRANSFORMATION)
+        )
         self.lambda_ = props.get("lambda", float(0.5))
 
     def end_opl(self):
@@ -115,6 +120,7 @@ class TransientHDRFilm(mi.Film):
             rfilter=self.rfilter(),
             spp=spp,
             lambda_=self.lambda_,
+            transformation=self.transformation,
         )
         self.channels = channels
 
@@ -157,29 +163,26 @@ class TransientHDRFilm(mi.Film):
 
     def develop_stats(self, total_spp):
         count = self.gather_tensor(self.transient_storage.count_tensor)
-        count2 = self.gather_tensor(self.transient_storage.count2_tensor)
         media = self.gather_tensor(self.transient_storage.tensor)
         sum1 = self.gather_tensor(self.transient_storage.sum1_tensor)
         sum2 = self.gather_tensor(self.transient_storage.sum2_tensor)
         sum3 = self.gather_tensor(self.transient_storage.sum3_tensor)
-        # if np.array_equal(count, count2):
-        # print("Los tensores son iguales.")
-        # else:
-        # print("Los tensores son distintos.")
-        print("Count pyxel: ", count[324, 690, 1, :])
-        print("Count2 pyxel", count2[324, 690, 1, :])
-        print("Media pyxel: ", media[324, 690, 1, :])
-        print("Sum1 pyxel: ", sum1[324, 690, 1, :])
-        print(
-            "Min Mean Max count: ",
-            dr.min(count),
-            " ",
-            dr.mean(count),
-            " ",
-            dr.max(count),
-        )
 
         samples_bounce = total_spp * 17
+        missing = samples_bounce - count
+        # Box-Cox of zero (0 transformed)
+        if self.transformation == YEO_JOHNSON_TRANSFORMATION:
+            zero_transformed = self.transient_storage.yeo_johnson(0.0)
+        elif self.transformation == BOX_COX_TRANSFORMATION:
+            zero_transformed = self.transient_storage.box_cox(0.0)
+        else:
+            zero_transformed = 0.0
+
+        # Fill accumulators with zeros
+        sum1 += missing * zero_transformed
+        sum2 += missing * zero_transformed**2
+        sum3 += missing * zero_transformed**3
+
         mu = sum1 / samples_bounce
 
         var = (sum2 - (samples_bounce * mu**2)) / (samples_bounce - 1)
@@ -188,8 +191,8 @@ class TransientHDRFilm(mi.Film):
         m3 = (sum3 / samples_bounce) - (3 * mu * var) - (mu**3)
 
         # When the variance is 0 there is no need for skewness correction
-        estimands = dr.select(var == 0, mu, mu + m3 / (6 * var * samples_bounce))
-        estimands_variance = var / samples_bounce  # Guardar las estadisticas juntas
+        estimands = dr.select(var == 0.0, mu, mu + m3 / (6 * var * samples_bounce))
+        estimands_variance = var / samples_bounce
         print(
             "Min Mean Max estimands: ",
             dr.min(estimands),
@@ -256,6 +259,7 @@ class TransientHDRFilm(mi.Film):
         distance: mi.Float,
         wavelengths: mi.UnpolarizedSpectrum,
         spec: mi.Spectrum,
+        spec_: mi.Spectrum,
         ray_weight: mi.Float,
         active: mi.Bool,
     ):
@@ -277,6 +281,7 @@ class TransientHDRFilm(mi.Film):
             pos=coords,
             wavelengths=wavelengths,
             value=spec * ray_weight,
+            value_=spec_ * ray_weight,
             alpha=mi.Float(0.0),
             # value should have the sample scale already multiplied
             weight=mi.Float(0.0),

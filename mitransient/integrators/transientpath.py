@@ -112,14 +112,6 @@ class TransientPath(TransientADIntegrator):
         prev_bsdf_pdf = mi.Float(1.0)
         prev_bsdf_delta = mi.Bool(True)
 
-        # Variables for statisticas
-        sample_value = mi.Spectrum(0 if primal else state_in)  # Radiance accumulator
-        transient_pos = dr.full(mi.UInt32, 0)
-        current_transient_pos = dr.full(mi.UInt32, self.film.temporal_bins)
-        pos_distance = dr.full(mi.Float, 0.0)
-        last_update = mi.Bool(False)
-        mask = mi.Bool(True)
-
         if self.camera_unwarp:
             si = scene.ray_intersect(
                 mi.Ray3f(ray), ray_flags=mi.RayFlags.All, coherent=mi.Mask(True)
@@ -175,27 +167,6 @@ class TransientPath(TransientADIntegrator):
             # Add transient contribution because of emitter found
             add_transient(Le, distance, ray.wavelengths, active)
 
-            # TODO: Resvisar esto
-            pos_distance = (distance - self.film.start_opl) / self.film.bin_width_opl
-            mask = (pos_distance >= 0.0) & (pos_distance < self.film.temporal_bins)
-
-            current_transient_pos = dr.select(
-                mask, mi.UInt32(dr.floor(pos_distance)), self.film.temporal_bins
-            )
-            to_update = active  # & mask & (transient_pos != current_transient_pos)
-            update_stats(Le, current_transient_pos, to_update)
-            # for k in range(3):
-            #     # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
-            #     sample_value[k] = dr.select(to_update, 0.0, sample_value[k])
-            #     # En caso de que el camino siga activo sumar la nueva contribucion y el nuevo sample sea valido
-            #     sample_value[k] += dr.select(mask & active, Le[k], 0.0)
-            # Update transient position
-            # transient_pos = dr.select(
-            #     to_update,
-            #     current_transient_pos,
-            #     transient_pos,
-            # )
-
             # ---------------------- Emitter sampling ----------------------
 
             # Should we continue tracing to reach one more vertex?
@@ -229,29 +200,6 @@ class TransientPath(TransientADIntegrator):
 
             # Add contribution direct emitter sampling
             add_transient(Lr_dir, distance + ds.dist * η, ray.wavelengths, active)
-
-            # TODO: Resvisar esto
-            pos_distance = (
-                (distance + ds.dist * η) - self.film.start_opl
-            ) / self.film.bin_width_opl
-            mask = (pos_distance >= 0.0) & (pos_distance < self.film.temporal_bins)
-
-            current_transient_pos = dr.select(
-                mask, mi.UInt32(dr.floor(pos_distance)), self.film.temporal_bins
-            )
-            to_update = active  # & mask & (transient_pos != current_transient_pos)
-            update_stats(Lr_dir, current_transient_pos, to_update)
-            # for k in range(3):
-            #     # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
-            #     sample_value[k] = dr.select(to_update, 0.0, sample_value[k])
-            #     # En caso de que el camino siga activo sumar la nueva contribucion y el nuevo sample sea valido
-            #     sample_value[k] += dr.select(mask & active, Lr_dir[k], 00)
-            # Update transient position
-            # transient_pos = dr.select(
-            #     to_update,
-            #     current_transient_pos,
-            #     transient_pos,
-            # )
 
             # ------------------ Detached BSDF sampling -------------------
 
@@ -348,13 +296,6 @@ class TransientPath(TransientADIntegrator):
 
             depth[si.is_valid()] += 1
             active = active_next
-
-            # to_update = ~active & ~last_update
-            # last_update = ~active
-            # update_stats(sample_value, transient_pos, to_update)
-
-        # Queremos actualizar todos los samples
-        # update_stats(mi.Bool(True))
 
         return (
             L if primal else δL,  # Radiance/differential radiance

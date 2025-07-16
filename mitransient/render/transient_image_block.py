@@ -3,7 +3,7 @@ from typing import Sequence
 import drjit as dr
 import mitsuba as mi
 
-from ..utils import indent
+from ..utils import BOX_COX_TRANSFORMATION, YEO_JOHNSON_TRANSFORMATION, indent
 
 
 class TransientImageBlock(mi.Object):
@@ -23,6 +23,7 @@ class TransientImageBlock(mi.Object):
         rfilter: mi.ReconstructionFilter,
         spp,
         lambda_: float = 0.5,
+        transformation: int = YEO_JOHNSON_TRANSFORMATION,
         border: bool = False,
         # normalize: bool = False,
         # coalesce: bool = False,
@@ -44,6 +45,7 @@ class TransientImageBlock(mi.Object):
         self.warn_invalid = warn_invalid
         self.spp = spp
         self.lambda_ = lambda_
+        self.transformation = transformation
 
         if rfilter and rfilter.is_box_filter():
             self.rfilter = None
@@ -68,7 +70,6 @@ class TransientImageBlock(mi.Object):
         # Compensation is not implented: https://github.com/mitsuba-renderer/mitsuba3/blob/b2ec619c7ba612edb1cf820463b32e5a334d8471/src/render/imageblock.cpp#L80
 
         self.count_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
-        self.count2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum1_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum2_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
         self.sum3_tensor = mi.TensorXf(dr.zeros(mi.Float, size_flat), shape)
@@ -79,9 +80,28 @@ class TransientImageBlock(mi.Object):
 
         self.size_xyt = size_xyt
 
-    def accum(self, value: mi.Float, index: mi.UInt32, active: mi.Bool):
+    def accum(
+        self, value: mi.Float, value_: mi.Float, index: mi.UInt32, active: mi.Bool
+    ):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
-        dr.scatter_reduce(dr.ReduceOp.Add, self.count2_tensor.array, 1.0, index, active)
+        dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1.0, index, active)
+
+        # Stats
+        if self.transformation == YEO_JOHNSON_TRANSFORMATION:
+            value_transformed = self.yeo_johnson(value_)
+        elif self.transformation == BOX_COX_TRANSFORMATION:
+            value_transformed = self.box_cox(value_)
+        else:
+            value_transformed = value_
+        dr.scatter_reduce(
+            dr.ReduceOp.Add, self.sum1_tensor.array, value_transformed, index, active
+        )
+        dr.scatter_reduce(
+            dr.ReduceOp.Add, self.sum2_tensor.array, value_transformed**2, index, active
+        )
+        dr.scatter_reduce(
+            dr.ReduceOp.Add, self.sum3_tensor.array, value_transformed**3, index, active
+        )
 
     def box_cox(self, sample):
         return (
@@ -100,68 +120,40 @@ class TransientImageBlock(mi.Object):
             # else:
             return -dr.log(-sample + 1)
 
-    def update_stats(
-        self,
-        value: mi.Spectrum,
-        transient_pos: mi.UInt32,
-        pos: mi.Vector2f,
-        to_update: mi.Bool,
-    ):
-        coords = mi.Vector3f(pos.x, pos.y, transient_pos)
-        p = mi.Point3u(dr.floor(coords) - self.offset_xyt)
-
-        index = dr.fma(p.y, self.size_xyt.x, p.x)
-        index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
-        to_update &= dr.all((0 <= p) & (p < self.size_xyt))
-        for k in range(3):
-            sample_transformed = self.yeo_johnson(value[k])
-            dr.scatter_reduce(
-                dr.ReduceOp.Add,
-                self.sum1_tensor.array,
-                sample_transformed,
-                index + k,
-                to_update,
-            )
-            dr.scatter_reduce(
-                dr.ReduceOp.Add, self.count_tensor.array, 1.0, index + k, to_update
-            )
-            dr.scatter_reduce(
-                dr.ReduceOp.Add,
-                self.sum2_tensor.array,
-                sample_transformed**2,
-                index + k,
-                to_update,
-            )
-            dr.scatter_reduce(
-                dr.ReduceOp.Add,
-                self.sum3_tensor.array,
-                sample_transformed**3,
-                index + k,
-                to_update,
-            )
-
     def put(
         self,
         pos: mi.Point3f,
         wavelengths: mi.UnpolarizedSpectrum,
         value: mi.Spectrum,
+        value_: mi.Spectrum,
         alpha: mi.Float,
         weight: mi.Float,
         active: bool = True,
     ):
         spec_u = mi.unpolarized_spectrum(value)
+        spec_u_ = mi.unpolarized_spectrum(value_)
 
         if mi.is_spectral:
             rgb = mi.spectrum_to_srgb(spec_u, wavelengths, active)
             values = [rgb.x, rgb.y, rgb.z, alpha, weight]
+            rgb_ = mi.spectrum_to_srgb(spec_u_, wavelengths, active)
+            values_ = [rgb_.x, rgb_.y, rgb_.z, alpha, weight]
         elif mi.is_monochromatic:
             values = [spec_u.x, alpha, weight]
+            values_ = [spec_u_.x, alpha, weight]
         else:
             values = [spec_u.x, spec_u.y, spec_u.z, alpha, weight]
+            values_ = [spec_u_.x, spec_u_.y, spec_u_.z, alpha, weight]
 
-        self.put_(pos, values, active)
+        self.put_(pos, values, values_, active)
 
-    def put_(self, pos: mi.Point3f, values: Sequence[mi.Float], active: bool = True):
+    def put_(
+        self,
+        pos: mi.Point3f,
+        values: Sequence[mi.Float],
+        values_: Sequence[mi.Float],
+        active: bool = True,
+    ):
         # Check if all sample values are valid
         if self.warn_negative or self.warn_invalid:
             is_valid = True
@@ -195,7 +187,7 @@ class TransientImageBlock(mi.Object):
             active &= dr.all((0 <= p) & (p < self.size_xyt))
 
             for k in range(self.channel_count):
-                self.accum(values[k], index + k, active)
+                self.accum(values[k], values_[k], index + k, active)
 
         else:
             mi.Log(

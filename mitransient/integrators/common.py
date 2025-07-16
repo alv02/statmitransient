@@ -222,7 +222,7 @@ class TransientADIntegrator(ADIntegrator):
         It pre-multiplies the sample scale.
         """
         return lambda spec, distance, wavelengths, active: film.add_transient_data(
-            pos, distance, wavelengths, spec * sample_scale, ray_weight, active
+            pos, distance, wavelengths, spec * sample_scale, spec, ray_weight, active
         )
 
     def update_stats_f(

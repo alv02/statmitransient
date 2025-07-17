@@ -19,18 +19,20 @@ def show_debug_video(
     estimands,
     patches,
     estimands_variance,
+    w_ij,
     axis_video=2,
-    figsize=(15, 10),
+    figsize=(15, 15),
 ):
     """
-    Shows weights_jbf, membership, final_weights, tile, patches, and denoised_tile as a combined video.
+    Shows weights_jbf, membership, final_weights, tile, patches, estimands_variance, and w_ij as a combined video.
 
     :param weights_jbf: array of shape [H, W, T, 1] - bilateral weights
     :param membership: array of shape [H, W, T, 1] - membership values (0 or 1)
     :param final_weights: array of shape [H, W, T, 1] - final combined weights
     :param estimands: array of shape [H, W, T, C] - estimands
     :param patches: array of shape [H, W, T, C] - patches data
-    :param estimands_variance: array of shape [H, W, T, C] -  estimands_variance
+    :param estimands_variance: array of shape [H, W, T, C] - estimands_variance
+    :param w_ij: array of shape [H, W, T, 3] - weights between 0.5 and 1 for 3 channels
     :param int axis_video: axis of the array for the temporal dimension (default: 2 for T)
     :param tuple figsize: figure size for the plot
     """
@@ -47,8 +49,8 @@ def show_debug_video(
 
     num_frames = weights_jbf.shape[axis_video]
 
-    # Create figure with 2 rows, 3 columns
-    fig, axes = plt.subplots(2, 3, figsize=figsize)
+    # Create figure with 3 rows, 3 columns
+    fig, axes = plt.subplots(3, 3, figsize=figsize)
     fig.suptitle("Debug Weights and Tiles Visualization", fontsize=16)
 
     # Initialize first frame for all tensors
@@ -60,6 +62,7 @@ def show_debug_video(
     frame_estimands_variance = estimands_variance[
         generate_index(axis_video, len(estimands_variance.shape), 0)
     ]
+    frame_w_ij = w_ij[generate_index(axis_video, len(w_ij.shape), 0)]
 
     # Top row: weights
     im1 = axes[0, 0].imshow(frame_weights, cmap="viridis", vmin=0, vmax=1)
@@ -77,7 +80,7 @@ def show_debug_video(
     axes[0, 2].axis("off")
     plt.colorbar(im3, ax=axes[0, 2], fraction=0.046, pad=0.04)
 
-    # Bottom row: tiles (assuming RGB channels, take first 3 channels)
+    # Middle row: tiles (assuming RGB channels, take first 3 channels)
     # Clamp values to [0, 1] for proper display
     frame_estimands_rgb = np.clip(frame_estimands[..., :3], 0, 1)
     frame_patches_rgb = np.clip(frame_patches[..., :3], 0, 1)
@@ -94,6 +97,22 @@ def show_debug_video(
     im6 = axes[1, 2].imshow(frame_estimands_variance_rgb)
     axes[1, 2].set_title("Estimands variance")
     axes[1, 2].axis("off")
+
+    # Bottom row: w_ij channels (3 channels)
+    im7 = axes[2, 0].imshow(frame_w_ij[..., 0], cmap="viridis", vmin=0.5, vmax=1)
+    axes[2, 0].set_title("w_ij Channel 0")
+    axes[2, 0].axis("off")
+    plt.colorbar(im7, ax=axes[2, 0], fraction=0.046, pad=0.04)
+
+    im8 = axes[2, 1].imshow(frame_w_ij[..., 1], cmap="viridis", vmin=0.5, vmax=1)
+    axes[2, 1].set_title("w_ij Channel 1")
+    axes[2, 1].axis("off")
+    plt.colorbar(im8, ax=axes[2, 1], fraction=0.046, pad=0.04)
+
+    im9 = axes[2, 2].imshow(frame_w_ij[..., 2], cmap="viridis", vmin=0.5, vmax=1)
+    axes[2, 2].set_title("w_ij Channel 2")
+    axes[2, 2].axis("off")
+    plt.colorbar(im9, ax=axes[2, 2], fraction=0.046, pad=0.04)
 
     # Add frame counter
     frame_text = fig.text(
@@ -115,6 +134,7 @@ def show_debug_video(
         frame_denoised = estimands_variance[
             generate_index(axis_video, len(estimands_variance.shape), i)
         ]
+        frame_w_ij = w_ij[generate_index(axis_video, len(w_ij.shape), i)]
 
         # Update weight images
         im1.set_data(frame_weights)
@@ -130,9 +150,14 @@ def show_debug_video(
         im5.set_data(frame_patches_rgb)
         im6.set_data(frame_denoised_rgb)
 
+        # Update w_ij channels
+        im7.set_data(frame_w_ij[..., 0])
+        im8.set_data(frame_w_ij[..., 1])
+        im9.set_data(frame_w_ij[..., 2])
+
         frame_text.set_text(f"Frame: {i}/{num_frames-1}")
 
-        return [im1, im2, im3, im4, im5, im6, frame_text]
+        return [im1, im2, im3, im4, im5, im6, im7, im8, im9, frame_text]
 
     ani = animation.FuncAnimation(
         fig, update, frames=num_frames, repeat=True, interval=200

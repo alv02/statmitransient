@@ -183,9 +183,12 @@ class TransientHDRFilm(mi.Film):
         sum2 += missing * zero_transformed**2
         sum3 += missing * zero_transformed**3
 
+        # Calculate stats with accumulated non central moments
         mu = sum1 / samples_bounce
 
-        var = (sum2 - (samples_bounce * mu**2)) / (samples_bounce - 1)
+        var = (
+            sum2 / samples_bounce
+        ) - mu**2  # (sum2 - (samples_bounce * mu**2)) / (samples_bounce - 1)
         var = dr.select(var < 0.0, 0.0, var)
 
         m3 = (sum3 / samples_bounce) - (3 * mu * var) - (mu**3)
@@ -193,6 +196,18 @@ class TransientHDRFilm(mi.Film):
         # When the variance is 0 there is no need for skewness correction
         estimands = dr.select(var == 0.0, mu, mu + m3 / (6 * var * samples_bounce))
         estimands_variance = var / samples_bounce
+
+        # mu = dr.select(count > 0, sum1 / count, zero_transformed)
+        #
+        # var = dr.select(count > 1, (sum2 - (count * mu**2)) / (count - 1), 0)
+        # var = dr.select(var < 0.0, 0.0, var)
+        #
+        # m3 = dr.select(count > 0, (sum3 / count) - (3 * mu * var) - (mu**3), 0)
+        #
+        # estimands = dr.select(
+        #     (var > 0.0) & (count > 0), mu + m3 / (6 * var * count), mu
+        # )
+        # estimands_variance = var / samples_bounce
         print(
             "Min Mean Max estimands: ",
             dr.min(estimands),

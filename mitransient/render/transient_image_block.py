@@ -84,7 +84,7 @@ class TransientImageBlock(mi.Object):
         self, value: mi.Float, value_: mi.Float, index: mi.UInt32, active: mi.Bool
     ):
         dr.scatter_reduce(dr.ReduceOp.Add, self.tensor.array, value, index, active)
-        dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1.0, index, active)
+        return
 
         # Stats
         if self.transformation == YEO_JOHNSON_TRANSFORMATION:
@@ -102,6 +102,47 @@ class TransientImageBlock(mi.Object):
         dr.scatter_reduce(
             dr.ReduceOp.Add, self.sum3_tensor.array, value_transformed**3, index, active
         )
+        dr.scatter_reduce(dr.ReduceOp.Add, self.count_tensor.array, 1.0, index, active)
+
+    def update_stats(
+        self,
+        value: mi.Spectrum,
+        transient_pos: mi.UInt32,
+        pos: mi.Vector2f,
+        to_update: mi.Bool,
+    ):
+        coords = mi.Vector3f(pos.x, pos.y, transient_pos)
+        p = mi.Point3u(dr.floor(coords) - self.offset_xyt)
+
+        index = dr.fma(p.y, self.size_xyt.x, p.x)
+        index = dr.fma(index, self.size_xyt.z, p.z) * self.channel_count
+        to_update &= dr.all((0 <= p) & (p < self.size_xyt))
+        for k in range(3):
+            sample_transformed = self.yeo_johnson(value[k])
+            dr.scatter_reduce(
+                dr.ReduceOp.Add,
+                self.sum1_tensor.array,
+                sample_transformed,
+                index + k,
+                to_update,
+            )
+            dr.scatter_reduce(
+                dr.ReduceOp.Add, self.count_tensor.array, 1.0, index + k, to_update
+            )
+            dr.scatter_reduce(
+                dr.ReduceOp.Add,
+                self.sum2_tensor.array,
+                sample_transformed**2,
+                index + k,
+                to_update,
+            )
+            dr.scatter_reduce(
+                dr.ReduceOp.Add,
+                self.sum3_tensor.array,
+                sample_transformed**3,
+                index + k,
+                to_update,
+            )
 
     def box_cox(self, sample):
         return (

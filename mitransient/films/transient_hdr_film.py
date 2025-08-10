@@ -168,8 +168,8 @@ class TransientHDRFilm(mi.Film):
         sum2 = self.gather_tensor(self.transient_storage.sum2_tensor)
         sum3 = self.gather_tensor(self.transient_storage.sum3_tensor)
 
-        samples_bounce = total_spp * 17
-        missing = samples_bounce - count
+        n_samples = total_spp
+        missing = n_samples - count
         # Box-Cox of zero (0 transformed)
         if self.transformation == YEO_JOHNSON_TRANSFORMATION:
             zero_transformed = self.transient_storage.yeo_johnson(0.0)
@@ -184,18 +184,18 @@ class TransientHDRFilm(mi.Film):
         sum3 += missing * zero_transformed**3
 
         # Calculate stats with accumulated non central moments
-        mu = sum1 / samples_bounce
+        mu = sum1 / n_samples
 
         var = (
-            sum2 / samples_bounce
+            sum2 / n_samples
         ) - mu**2  # (sum2 - (samples_bounce * mu**2)) / (samples_bounce - 1)
         var = dr.select(var < 0.0, 0.0, var)
 
-        m3 = (sum3 / samples_bounce) - (3 * mu * var) - (mu**3)
+        m3 = (sum3 / n_samples) - (3 * mu * var) - (mu**3)
 
         # When the variance is 0 there is no need for skewness correction
-        estimands = dr.select(var == 0.0, mu, mu + m3 / (6 * var * samples_bounce))
-        estimands_variance = var / samples_bounce
+        estimands = dr.select(var == 0.0, mu, mu + m3 / (6 * var * n_samples))
+        estimands_variance = var / n_samples
 
         # mu = dr.select(count > 0, sum1 / count, zero_transformed)
         #

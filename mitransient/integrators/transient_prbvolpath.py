@@ -114,6 +114,7 @@ class TransientPRBVolpathIntegrator(TransientADIntegrator):
         active: mi.Bool,
         # TODO (JORGE): revise
         add_transient: Callable[[Any, Any, Any, Any], None],
+        update_stats: Callable[[mi.Spectrum, mi.UInt32, mi.Mask], None],
         **kwargs,  # Absorbs unused arguments
     ) -> Tuple[mi.Spectrum, mi.Bool, List[mi.Float], mi.Spectrum]:
         self.prepare_scene(scene)
@@ -149,6 +150,14 @@ class TransientPRBVolpathIntegrator(TransientADIntegrator):
         specular_chain = mi.Bool(True)
 
         distance = mi.Float(0.0)  # Distance of the path
+
+        # Variables for statisticas
+        sample_value = mi.Spectrum(0 if is_primal else state_in)  # Radiance accumulator
+        transient_pos = dr.full(mi.UInt32, 0)
+        current_transient_pos = dr.full(mi.UInt32, self.film.temporal_bins)
+        pos_distance = dr.full(mi.Float, 0.0)
+        last_update = mi.Bool(False)
+        mask = mi.Bool(True)
 
         # Correct for camera unwarping
         if self.camera_unwarp:
@@ -291,6 +300,29 @@ class TransientPRBVolpathIntegrator(TransientADIntegrator):
 
                 add_transient(contrib, distance, ray.wavelengths, active_e)
 
+                # TODO: Resvisar esto
+                pos_distance = (
+                    distance - self.film.start_opl
+                ) / self.film.bin_width_opl
+                mask = (pos_distance >= 0.0) & (pos_distance < self.film.temporal_bins)
+
+                current_transient_pos = dr.select(
+                    mask, mi.UInt32(dr.floor(pos_distance)), self.film.temporal_bins
+                )
+                to_update = active_e & mask & (transient_pos != current_transient_pos)
+                update_stats(sample_value, transient_pos, to_update)
+                for k in range(3):
+                    # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
+                    sample_value[k] = dr.select(to_update, 0.0, sample_value[k])
+                    # En caso de que el camino siga activo sumar la nueva contribucion y el nuevo sample sea valido
+                    sample_value[k] += dr.select(mask & active_e, contrib[k], 0.0)
+                # Update transient position
+                transient_pos = dr.select(
+                    to_update,
+                    current_transient_pos,
+                    transient_pos,
+                )
+
                 active_surface &= si.is_valid()
                 ctx = mi.BSDFContext()
                 bsdf = si.bsdf(ray)
@@ -368,6 +400,33 @@ class TransientPRBVolpathIntegrator(TransientADIntegrator):
 
                     add_transient(
                         contrib, distance + ds.dist * η, ray.wavelengths, active_e
+                    )
+
+                    # TODO: Resvisar esto
+                    pos_distance = (
+                        (distance + ds.dist * η) - self.film.start_opl
+                    ) / self.film.bin_width_opl
+                    mask = (pos_distance >= 0.0) & (
+                        pos_distance < self.film.temporal_bins
+                    )
+
+                    current_transient_pos = dr.select(
+                        mask, mi.UInt32(dr.floor(pos_distance)), self.film.temporal_bins
+                    )
+                    to_update = (
+                        active_e & mask & (transient_pos != current_transient_pos)
+                    )
+                    update_stats(sample_value, transient_pos, to_update)
+                    for k in range(3):
+                        # En caso de que se haya actualizado el sample para un bin resetear el sumador de bounces para el nuevo bin
+                        sample_value[k] = dr.select(to_update, 0.0, sample_value[k])
+                        # En caso de que el camino siga activo sumar la nueva contribucion y el nuevo sample sea valido
+                        sample_value[k] += dr.select(mask & active_e, contrib[k], 0.0)
+                    # Update transient position
+                    transient_pos = dr.select(
+                        to_update,
+                        current_transient_pos,
+                        transient_pos,
                     )
 
                 # -------------------- Phase function sampling ------------------
@@ -451,6 +510,9 @@ class TransientPRBVolpathIntegrator(TransientADIntegrator):
                 has_medium_trans = active_surface & si.is_medium_transition()
                 medium[has_medium_trans] = si.target_medium(ray.d)
                 active &= active_surface | active_medium
+                to_update = ~active & ~last_update
+                last_update = ~active
+                update_stats(sample_value, transient_pos, to_update)
 
         return L if is_primal else δL, valid_ray, [], L
 

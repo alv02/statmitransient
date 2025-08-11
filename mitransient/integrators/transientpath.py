@@ -346,7 +346,11 @@ class TransientPath(TransientADIntegrator):
                         δL += dr.forward_to(Lo)
 
             depth[si.is_valid()] += 1
+
             active = active_next
+            to_update = ~active & ~last_update
+            last_update = ~active
+            update_stats(sample_value, transient_pos, to_update)
 
         return (
             L if primal else δL,  # Radiance/differential radiance
